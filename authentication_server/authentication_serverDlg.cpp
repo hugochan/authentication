@@ -95,6 +95,7 @@ BEGIN_MESSAGE_MAP(Cauthentication_serverDlg, CDialogEx)
 	ON_MESSAGE(WM_POST_CurrentClientMSG, &Cauthentication_serverDlg::UpdateCurrentClient)
 	ON_CBN_DBLCLK(IDC_COMBO1, &Cauthentication_serverDlg::OnCbnDblclkCurrentClient)
 	ON_CBN_EDITCHANGE(IDC_COMBO1, &Cauthentication_serverDlg::OnCbnEditchangeCurrentClient)
+	ON_CBN_DROPDOWN(IDC_COMBO1, &Cauthentication_serverDlg::OnCbnDropdownCurrentClient)
 END_MESSAGE_MAP()
 
 
@@ -330,7 +331,7 @@ LRESULT	Cauthentication_serverDlg::WindowProc(UINT message, WPARAM wParam, LPARA
 	USHORT lineNum, countPerLine = 25;
 	char buf[4096], i;
 	int len;
-	CString tempName, tempBuf(""), tempBuf2("");
+	CString tempName, tempBuf("");
 	CString queryData(""), queryReply("");
 	switch (message){
 	case UM_SOCK:
@@ -464,15 +465,18 @@ LRESULT	Cauthentication_serverDlg::WindowProc(UINT message, WPARAM wParam, LPARA
 								break;
 						}
 						else{
+							//更新聊天对话框内容
 							buf[len] = 0;
 							tempBuf.Format(_T("%s"), buf);
-							tempBuf2.Format(_T("%d: "), int(s));
-							tempBuf = tempBuf2 + tempBuf;
+							tempBuf = sub_sock.clientName[i] + CString("： ") + tempBuf;
 							sub_sock.clientDlg[i] += (tempBuf + CString("\r\n"));
 							DisplayText = sub_sock.clientDlg[i];
-
 							//将CurrentClient更新为此client
-
+							
+							int nIndex = CurrentClient.FindStringExact(0, sub_sock.clientName[i] + CString("\r\n"));
+							if (nIndex != -1){
+								CurrentClient.SetCurSel(nIndex);
+							}
 							//arrange the text to make it well organized
 							/*					len = sub_sock.clientDlg[i].GetLength();
 												if (len % countPerLine == 0){
@@ -630,4 +634,13 @@ void Cauthentication_serverDlg::OnCbnDblclkCurrentClient()
 void Cauthentication_serverDlg::OnCbnEditchangeCurrentClient()
 {
 	// TODO: Add your control notification handler code here
+}
+
+
+void Cauthentication_serverDlg::OnCbnDropdownCurrentClient()
+{
+	// TODO: Add your control notification handler code here
+	if (CurrentClient.GetCount() != 0){
+		//CurrentClient.ShowDropDown(TRUE);
+	}
 }

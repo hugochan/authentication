@@ -92,4 +92,5 @@ public:
 	CComboBox CurrentClient;
 	char CurrentClientMsgFlag;//0:add 1:delete 2:flush
 	afx_msg void OnCbnEditchangeCurrentClient();
+	afx_msg void OnCbnDropdownCurrentClient();
 };

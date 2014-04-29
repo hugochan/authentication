@@ -333,7 +333,7 @@ LRESULT Cauthentication_clientDlg::WindowProc(UINT message, WPARAM wParam, LPARA
 							buf[len] = 0;
 							tempBuf.Format(_T("%s"), buf);
 							//data_from_server.content = tempBuf;
-							DisplayText += (CString("server: ") + tempBuf + CString("\r\n"));
+							DisplayText += (CString("server£º ") + tempBuf + CString("\r\n"));
 							//arrange the text to make it well organized
 							/*			len = tempBuf.GetLength();
 							if (len % countPerLine == 0){
