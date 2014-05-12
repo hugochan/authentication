@@ -39,11 +39,19 @@ public:
 		bool current_state0;//0 无服务 1 有服务
 	};
 	struct mainSock main_sock;
-	
+
+	struct tranSock
+	{
+		SOCKET transock;
+		bool current_state;//0 无服务 1 有服务
+	};
+	struct tranSock tran_sock;
+
 	struct DataFromClient
 	{
 		#define type_result 0
 		#define type_chat_DataFromClient   1
+		#define type_upload_DataFromClient 2
 		char Type;
 		UINT queryResult;
 		CString content;
@@ -68,7 +76,7 @@ public:
 	struct subSock
 	{
 		#define maxSubSockNum 64
-		char count;
+		UINT count;
 		char current_state1[maxSubSockNum];//0 等待接收连接请求 1 等待接收验证回复信息 2 工作状态
 		SOCKET subSockArray[maxSubSockNum];
 		CString clientName[maxSubSockNum];
@@ -77,6 +85,26 @@ public:
 	};
 	struct subSock sub_sock;
 
+	/*file abstract*/
+	struct FileAbstract
+	{
+		char filepath[100];
+		LONG32 filesize;
+	};
+	struct FileAbstract file_abstract;
+
+	/*temporary transfer record Buffer for every client*/
+	struct TTRB
+	{
+		#define maxNumOfTTRB 64
+		UINT	count;//有效记录数
+		CString clientName[maxNumOfTTRB];//用户名
+		SOCKET transock[maxNumOfTTRB];//传输套接字
+		CString filepath[maxNumOfTTRB];//接收存储路径文件名
+		LONG32 filesize[maxNumOfTTRB];//待接收文件大小
+	};
+	struct TTRB ttrb;
+	CString tempFilePath = "./recvfile/";
 
 	afx_msg void OnBnClickedButtonStartserver();
 	afx_msg void OnBnClickedButtonStopserver();
@@ -93,4 +121,12 @@ public:
 	char CurrentClientMsgFlag;//0:add 1:delete 2:flush
 	afx_msg void OnCbnEditchangeCurrentClient();
 	afx_msg void OnCbnDropdownCurrentClient();
+	afx_msg void OnBnClickedButtonUploadfile();
+	afx_msg void OnBnClickedButtonDownloadfile();
+	int Cauthentication_serverDlg::startTranServer();
+	int Cauthentication_serverDlg::initTTRB();
+	int Cauthentication_serverDlg::deleteTTRB(int index);
+	int Cauthentication_serverDlg::searchTTRB(SOCKET);
+	int Cauthentication_serverDlg::searchTTRB(CString);
+	int Cauthentication_serverDlg::findFreeTTRB();
 };

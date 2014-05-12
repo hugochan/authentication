@@ -493,14 +493,12 @@ LRESULT Cauthentication_clientDlg::WindowProc(UINT message, WPARAM wParam, LPARA
 void Cauthentication_clientDlg::OnBnClickedButtonUploadfile()
 {
 	CString filepath = "./client.txt";
+
 	if (3 == current_state){//判断是否为工作状态
 		UpdateData(TRUE);
 		int len, retval, retval2;
 		CString tempBuf;
-		LONG32 fileSize;
-		HANDLE hFile = CreateFile(filepath, GENERIC_READ, 0, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
-		if (hFile == INVALID_HANDLE_VALUE) return;
-		fileSize = GetFileSize(hFile, NULL);
+		char sendFileBuf[1024];
 
 		file_abstract.filepath[0]='c';
 		file_abstract.filepath[1] = 'l';
@@ -513,7 +511,7 @@ void Cauthentication_clientDlg::OnBnClickedButtonUploadfile()
 		file_abstract.filepath[8] = 'x';
 		file_abstract.filepath[9] = 't';
 		file_abstract.filepath[10] = '\0';
-		file_abstract.filesize = fileSize;
+		file_abstract.filesize = 100;
 		len = 11;
 		if (0 != len){
 			data_to_server.Type = type_upload_DataToServer;
@@ -532,18 +530,18 @@ void Cauthentication_clientDlg::OnBnClickedButtonUploadfile()
 				}
 			}
 			else{
+				
 
 				MessageBox(CString("begin to upload!")+file_abstract.filepath, CString("client"), MB_OK);
 				retval = startTransConnect();
 				if (retval == 0){//文件传输连接建立成功，准备文件并发送
+					HANDLE hFile = CreateFile(filepath, GENERIC_READ, 0, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
 					DWORD dwRead;
-					char *sendFileBuf = new char[fileSize];
-					bool bRet = ReadFile(hFile, sendFileBuf, fileSize, &dwRead, NULL);
+					bool bRet = ReadFile(hFile, sendFileBuf, 1024, &dwRead, NULL);
 					if (bRet == FALSE){
-						MessageBox(CString("fail to read the file: ") + file_abstract.filepath, CString("client"), MB_OK);
 					}
 					else if (dwRead == 0){//实际读取字节数
-						MessageBox(CString("fail to read the file: ") + file_abstract.filepath, CString("client"), MB_OK);
+					
 					}
 					else{
 

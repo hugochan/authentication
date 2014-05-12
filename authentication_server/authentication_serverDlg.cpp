@@ -12,6 +12,7 @@
 #endif
 
 #define UM_SOCK WM_USER + 100
+#define UM_SOCK_TRANS WM_USER + 101
 #define WM_POST_CurrentListMSG WM_USER + 2
 #define WM_POST_CurrentClientMSG WM_USER + 3
 // CAboutDlg dialog used for App About
@@ -60,15 +61,21 @@ Cauthentication_serverDlg::Cauthentication_serverDlg(CWnd* pParent /*=NULL*/)
 	//Initialize main_sock
 	main_sock.mainsock = 0;
 	main_sock.current_state0 = 0;//无服务
+	//Initialize tran_sock
+	tran_sock.transock = 0;
+	tran_sock.current_state = 0;//无服务
 	//Initialize sub_sock
-	sub_sock.count = 0;
 	char i;
+	sub_sock.count = 0;
 	for (i = 0; i < maxSubSockNum; i++){
 		sub_sock.current_state1[i] = 0;
 		sub_sock.subSockArray[i] = 0;
 		sub_sock.clientName[i] = _T("");
 		sub_sock.clientDlg[i] = _T("");
 	}
+
+	//Initialize ttrb
+	initTTRB();
 	m_hIcon = AfxGetApp()->LoadIcon(IDR_MAINFRAME);
 }
 
@@ -96,6 +103,8 @@ BEGIN_MESSAGE_MAP(Cauthentication_serverDlg, CDialogEx)
 	ON_CBN_DBLCLK(IDC_COMBO1, &Cauthentication_serverDlg::OnCbnDblclkCurrentClient)
 	ON_CBN_EDITCHANGE(IDC_COMBO1, &Cauthentication_serverDlg::OnCbnEditchangeCurrentClient)
 	ON_CBN_DROPDOWN(IDC_COMBO1, &Cauthentication_serverDlg::OnCbnDropdownCurrentClient)
+	ON_BN_CLICKED(IDC_BUTTON_UPLOADFILE, &Cauthentication_serverDlg::OnBnClickedButtonUploadfile)
+	ON_BN_CLICKED(IDC_BUTTON_DOWNLOADFILE, &Cauthentication_serverDlg::OnBnClickedButtonDownloadfile)
 END_MESSAGE_MAP()
 
 
@@ -216,6 +225,13 @@ void Cauthentication_serverDlg::OnBnClickedButtonStartserver()
 		retval = listen(main_sock.mainsock, 5);
 		retval = WSAAsyncSelect(main_sock.mainsock, m_hWnd, UM_SOCK, FD_ACCEPT);
 		main_sock.current_state0 = 1;//服务已开启
+		retval = startTranServer();//开启文件传输端口
+		if (retval == 0){
+		
+		}
+		else{
+		
+		}
 	}
 	else{
 		MessageBox(CString("server has been started!"), CString("server"), MB_OK);
@@ -329,8 +345,10 @@ LRESULT	Cauthentication_serverDlg::WindowProc(UINT message, WPARAM wParam, LPARA
 	sockaddr_in remote;
 	int retval;
 	USHORT lineNum, countPerLine = 25;
-	char buf[4096], i;
+	const UINT bufSize = 4096;
+	char buf[bufSize], i;
 	int len;
+	int indexOfTTRB;
 	CString tempName, tempBuf("");
 	CString queryData(""), queryReply("");
 	switch (message){
@@ -447,7 +465,7 @@ LRESULT	Cauthentication_serverDlg::WindowProc(UINT message, WPARAM wParam, LPARA
 			else{
 				if (2 == sub_sock.current_state1[i]){
 					if (type_chat_DataFromClient == data_from_client.Type){
-						len = recv(s, (char *)buf, strlen(buf), 0);
+						len = recv(s, (char *)buf, bufSize, 0);
 						if (len <= 0){
 							retval = WSAGetLastError();
 							if (retval != WSAEWOULDBLOCK){
@@ -490,7 +508,43 @@ LRESULT	Cauthentication_serverDlg::WindowProc(UINT message, WPARAM wParam, LPARA
 												*/
 							UpdateData(FALSE);
 						}
-				}
+					}
+					else if (type_upload_DataFromClient == data_from_client.Type){
+						len = recv(s, (char *)&file_abstract, sizeof(file_abstract), 0);
+						if (len <= 0){
+							retval = WSAGetLastError();
+							if (retval != WSAEWOULDBLOCK){
+								closesocket(s);//关闭子套接字
+								//更新子套接字管理结构体（回收资源）
+								sub_sock.current_state1[i] = 0;
+								sub_sock.subSockArray[i] = 0;
+								sub_sock.clientName[i] = _T("");
+								sub_sock.clientDlg[i] = _T("");
+								sub_sock.count -= 1;
+								MessageBox(CString("failed to recv a file! close connection"), CString("server"), MB_OK);
+								break;
+							}
+							else
+								break;
+						}
+						else{
+							
+							MessageBox(CString("want to recv a file?")+file_abstract.filepath, CString("server"), MB_OK);
+							//更新TTRB
+							indexOfTTRB = findFreeTTRB();
+							ttrb.clientName[indexOfTTRB] = sub_sock.clientName[i];
+							ttrb.filepath[indexOfTTRB].Format(_T("./recvfile/%s"), file_abstract.filepath);
+							ttrb.filesize[indexOfTTRB] = file_abstract.filesize;
+							ttrb.count += 1;
+
+							//将CurrentClient更新为此client
+							int nIndex = CurrentClient.FindStringExact(0, sub_sock.clientName[i] + CString("\r\n"));
+							if (nIndex != -1){
+								CurrentClient.SetCurSel(nIndex);
+							}
+						}
+					}
+					
 				}
 				else if(1 == sub_sock.current_state1[i]){
 					if (type_result == data_from_client.Type){
@@ -565,9 +619,82 @@ LRESULT	Cauthentication_serverDlg::WindowProc(UINT message, WPARAM wParam, LPARA
 			break;
 		}
 		break;
+	case UM_SOCK_TRANS:
+		s = (SOCKET)LOWORD(wParam);
+		Event = LOWORD(lParam);
+		switch (Event){
+		case FD_ACCEPT:
+			len = sizeof(remote);
+			temps = accept(s, (sockaddr*)&remote, &len);
+			if (temps == SOCKET_ERROR){
+				closesocket(s);
+				tran_sock.transock = 0;
+				tran_sock.current_state = 0;
+				MessageBox(CString("fail to accept a file connection!"), CString("server"), MB_OK);
+			}
+			else{
+					indexOfTTRB = searchTTRB(sub_sock.clientName[0]);//待完善!!!!
+					ttrb.transock[indexOfTTRB] = temps;
+					MessageBox(CString("accept a file connection!"), CString("server"), MB_OK);
+					WSAAsyncSelect(temps, m_hWnd, UM_SOCK_TRANS, FD_READ | FD_CLOSE);
+			}
+
+			break;
+		case FD_READ:
+
+			indexOfTTRB = searchTTRB(s);
+			if (indexOfTTRB == -1) return 0;//如果子套接字非法，则拒绝接收
+			len = recv(s, buf, bufSize, 0);
+			if (len <= 0){
+				retval = WSAGetLastError();
+				if (retval != WSAEWOULDBLOCK){
+					closesocket(s);//关闭子套接字
+					deleteTTRB(indexOfTTRB);//销毁指定ttrb元素
+					MessageBox(CString("failed to recv file!"), CString("server"), MB_OK);
+					break;
+				}
+				else
+					break;
+			}
+			else{
+				if (len < bufSize){
+					buf[len] = '\0';
+				}
+				DWORD dwWrite;
+				bool bRet;
+				//保存文件
+				HANDLE hFile = CreateFile(ttrb.filepath[indexOfTTRB], GENERIC_WRITE, FILE_SHARE_WRITE, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+				if (hFile == INVALID_HANDLE_VALUE) return 0;
+				SetFilePointer(hFile, 0, NULL, FILE_END);
+				bRet = WriteFile(hFile, buf, len, &dwWrite, NULL);
+				if (bRet == FALSE){
+					MessageBox(CString("write file error!"), CString("server"), MB_OK);
+
+				}
+				else{
+					//MessageBox(CString("write file success!"), CString("server"), MB_OK);
+				}
+				CloseHandle(hFile);
+				
+				ttrb.filesize[indexOfTTRB] -= len;//更新待接收文件大小
+				if (ttrb.filesize[indexOfTTRB] <= 0){//文件接收完整
+					closesocket(s);//关闭子套接字
+					deleteTTRB(indexOfTTRB);//销毁指定ttrb元素
+					
+					
+					//通知对方成功接收文件
+					//To do？？？？？？？？？？？？？？？？
+				}
+
+			}
+
+			break;
+		case FD_CLOSE:
+			break;
+		}
+		break;
 	}
 	return CDialogEx::WindowProc(message, wParam, lParam);//为什么这里需要调用？？
-	//return 0;
 }
 
 LRESULT Cauthentication_serverDlg::UpdateCurrentList(WPARAM wParam, LPARAM lParam)
@@ -643,4 +770,112 @@ void Cauthentication_serverDlg::OnCbnDropdownCurrentClient()
 	if (CurrentClient.GetCount() != 0){
 		//CurrentClient.ShowDropDown(TRUE);
 	}
+}
+
+
+void Cauthentication_serverDlg::OnBnClickedButtonUploadfile()
+{
+	// TODO: Add your control notification handler code here
+}
+
+
+void Cauthentication_serverDlg::OnBnClickedButtonDownloadfile()
+{
+	// TODO: Add your control notification handler code here
+}
+
+int Cauthentication_serverDlg::startTranServer()
+{
+	if (tran_sock.current_state == 0){//服务未开启
+		int retval;
+		sockaddr_in server_trans;
+
+		tran_sock.transock = socket(AF_INET, SOCK_STREAM, 0);
+
+		server_trans.sin_family = AF_INET;
+		//server.sin_addr.S_un.S_addr = htonl(INADDR_ANY);//绑定所有IP地址
+		server_trans.sin_addr.S_un.S_un_b.s_b1 = 127;
+		server_trans.sin_addr.S_un.S_un_b.s_b2 = 0;
+		server_trans.sin_addr.S_un.S_un_b.s_b3 = 0;
+		server_trans.sin_addr.S_un.S_un_b.s_b4 = 1;
+
+		server_trans.sin_port = htons(9000);
+
+		retval = bind(tran_sock.transock, (sockaddr *)&server_trans, sizeof(server_trans));
+		retval = listen(tran_sock.transock, 5);
+		retval = WSAAsyncSelect(tran_sock.transock, m_hWnd, UM_SOCK_TRANS, FD_ACCEPT|FD_CLOSE);
+		tran_sock.current_state = 1;//服务已开启
+
+
+		if (retval == -1){
+			retval = WSAGetLastError();
+			if (retval != WSAEWOULDBLOCK){
+				closesocket(tran_sock.transock);
+				tran_sock.transock = 0;
+				MessageBox(CString("can`t start a server for file transfer!"), CString("server"), MB_OK);
+				return -1;
+			}
+			else{
+				MessageBox(CString("start server success for file transfer!"), CString("server"), MB_OK);
+			}
+		}
+		else{
+			MessageBox(CString("start server success for file transfer!"), CString("server"), MB_OK);
+		}
+	}
+	else{
+		MessageBox(CString("have started server for file transfer!"), CString("server"), MB_OK);
+	}
+	return 0;
+}
+
+int Cauthentication_serverDlg::initTTRB(){
+	char i;
+	ttrb.count = 0;
+	for (i = 0; i < maxNumOfTTRB; i++){
+		ttrb.clientName[i] = _T("");
+		ttrb.transock[i] = 0;
+		ttrb.filepath[i] = _T("");
+		ttrb.filesize[i] = 0;
+	}
+	return 0;
+}
+
+int Cauthentication_serverDlg::deleteTTRB(int index){
+	ttrb.count -= 1;
+	ttrb.clientName[index] = _T("");
+	ttrb.transock[index] = 0;
+	ttrb.filepath[index] = _T("");
+	ttrb.filesize[index] = 0;
+	return 0;
+}
+
+int Cauthentication_serverDlg::searchTTRB(SOCKET s){
+	int i;
+	for (i = 0; i < maxNumOfTTRB; i++){
+		if (ttrb.transock[i] == s){
+			return i;
+		}
+	}
+	return -1;
+}
+
+int Cauthentication_serverDlg::searchTTRB(CString clientName){
+	int i;
+	for (i = 0; i < maxNumOfTTRB; i++){
+		if (ttrb.clientName[i] == clientName){
+			return i;
+		}
+	}
+	return -1;
+}
+
+int Cauthentication_serverDlg::findFreeTTRB(){
+	int i;
+	for (i = 0; i < maxNumOfTTRB; i++){
+		if (ttrb.transock[i] == 0){
+			return i;
+		}
+	}
+	return -1;
 }

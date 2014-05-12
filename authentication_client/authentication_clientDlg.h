@@ -4,7 +4,7 @@
 
 #pragma once
 #include "afxcmn.h"
-
+#include "string"
 
 // Cauthentication_clientDlg dialog
 class Cauthentication_clientDlg : public CDialogEx
@@ -35,12 +35,21 @@ public:
 	afx_msg void OnBnClickedButtonStartconnect();
 	afx_msg void OnBnClickedButtonStopconnect();
 	afx_msg void OnBnClickedButtonSendmsg();
+	int Cauthentication_clientDlg::startTransConnect();
 	UINT password;
 	CIPAddressCtrl RemoteIP;
 	SHORT RemotePort;
+	SHORT TransPort;
 	CString SendMsgText;
 	CString DisplayText;
-	SOCKET sock;
+	SOCKET main_sock;
+
+	struct tranSock
+	{
+		SOCKET transock;
+		bool current_state;//0 无服务 1 有服务
+	};
+	struct tranSock tran_sock;
 
 	struct DataFromServer
 	{
@@ -62,11 +71,19 @@ public:
 	{
 		#define type_result 0
 		#define type_chat_DataToServer 1
+		#define type_upload_DataToServer 2
 		char Type;
 		UINT queryResult;
 		CString content;
 	};
 	struct DataToServer data_to_server;
+	/*file abstract*/
+	struct FileAbstract
+	{
+		char filepath[100];
+		LONG32 filesize;
+	};
+	struct FileAbstract file_abstract;
 
 /*	typedef enum{
 		STATE0 = 0,//初始状态
@@ -78,4 +95,6 @@ public:
 	STATE current_state;
 	*/
 	char current_state;//0 初始状态 1 等待质询数据状态 2 等待验证结果状态 3 工作状态
+	afx_msg void OnBnClickedButtonUploadfile();
+	afx_msg void OnBnClickedButtonDownloadfile();
 };
