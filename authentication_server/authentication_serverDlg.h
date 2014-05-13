@@ -52,7 +52,9 @@ public:
 		#define type_result 0
 		#define type_chat_DataFromClient   1
 		#define type_upload_DataFromClient 2
+		#define maxNumOfClientName 20
 		char Type;
+		char clientName[maxNumOfClientName];
 		UINT queryResult;
 		CString content;
 	};
@@ -63,6 +65,7 @@ public:
 		#define type_query 0
 		#define type_reply 1
 		#define type_chat_DataToClient  2
+		#define type_upload_DataToClient 3
 		#define valid CString("valid")
 		#define invalid CString("invalid")
 		char Type;
@@ -93,6 +96,16 @@ public:
 	};
 	struct FileAbstract file_abstract;
 
+	/*file transfer head*/
+	struct fileTransHead
+	{
+		#define transType_upload 0
+		#define transType_download 1
+		char clientName[maxNumOfClientName];
+		char transType;
+	};
+	struct fileTransHead file_trans_head;
+
 	/*temporary transfer record Buffer for every client*/
 	struct TTRB
 	{
@@ -103,7 +116,15 @@ public:
 		CString filepath[maxNumOfTTRB];//接收存储路径文件名
 		LONG32 filesize[maxNumOfTTRB];//待接收文件大小
 	};
-	struct TTRB ttrb;
+	struct TTRB ttrb_recv, ttrb_send;
+
+	/*file transfer head*/
+	struct FTH
+	{
+
+
+	};
+
 	CString tempFilePath = "./recvfile/";
 
 	afx_msg void OnBnClickedButtonStartserver();
@@ -124,9 +145,10 @@ public:
 	afx_msg void OnBnClickedButtonUploadfile();
 	afx_msg void OnBnClickedButtonDownloadfile();
 	int Cauthentication_serverDlg::startTranServer();
-	int Cauthentication_serverDlg::initTTRB();
-	int Cauthentication_serverDlg::deleteTTRB(int index);
-	int Cauthentication_serverDlg::searchTTRB(SOCKET);
-	int Cauthentication_serverDlg::searchTTRB(CString);
-	int Cauthentication_serverDlg::findFreeTTRB();
+	int Cauthentication_serverDlg::initTTRB(struct TTRB *);
+	int Cauthentication_serverDlg::deleteTTRB(struct TTRB *, int index);
+	int Cauthentication_serverDlg::searchTTRB(struct TTRB *, SOCKET);
+	int Cauthentication_serverDlg::searchTTRB(struct TTRB *, CString);
+	int Cauthentication_serverDlg::findFreeTTRB(struct TTRB *);
+	int Cauthentication_serverDlg::sendFile(int);
 };

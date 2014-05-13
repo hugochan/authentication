@@ -74,8 +74,12 @@ Cauthentication_serverDlg::Cauthentication_serverDlg(CWnd* pParent /*=NULL*/)
 		sub_sock.clientDlg[i] = _T("");
 	}
 
-	//Initialize ttrb
-	initTTRB();
+	//Initialize ttrb_recv
+	initTTRB(&ttrb_recv);
+
+	//Initialize ttrb_send
+	initTTRB(&ttrb_send);
+
 	m_hIcon = AfxGetApp()->LoadIcon(IDR_MAINFRAME);
 }
 
@@ -222,15 +226,25 @@ void Cauthentication_serverDlg::OnBnClickedButtonStartserver()
 		server.sin_port = htons(LocalPort);
 
 		retval = bind(main_sock.mainsock, (sockaddr *)&server, sizeof(server));
-		retval = listen(main_sock.mainsock, 5);
-		retval = WSAAsyncSelect(main_sock.mainsock, m_hWnd, UM_SOCK, FD_ACCEPT);
-		main_sock.current_state0 = 1;//服务已开启
-		retval = startTranServer();//开启文件传输端口
-		if (retval == 0){
-		
+		if (retval == -1)
+		{	
+			retval = WSAGetLastError();
+			MessageBox("bind error!", CString("server"), MB_OK);
+			return;
 		}
 		else{
-		
+			retval = listen(main_sock.mainsock, 5);
+			retval = WSAAsyncSelect(main_sock.mainsock, m_hWnd, UM_SOCK, FD_ACCEPT);
+			main_sock.current_state0 = 1;//服务已开启
+			retval = startTranServer();//开启文件传输端口
+			if (retval == -1){
+
+			}
+			else{
+			}
+			
+			MessageBox(CString("start server success!"), CString("server"), MB_OK);
+
 		}
 	}
 	else{
@@ -308,7 +322,6 @@ void Cauthentication_serverDlg::OnBnClickedButtonSendmsg()
 							sub_sock.clientName[i] = _T("");
 							sub_sock.clientDlg[i] = _T("");
 							sub_sock.count -= 1;
-							WSACleanup();
 							DisplayText = _T("");
 							UpdateData(FALSE);
 							MessageBox(CString("failed to send! close connection!"), CString("server"), MB_OK);
@@ -434,7 +447,6 @@ LRESULT	Cauthentication_serverDlg::WindowProc(UINT message, WPARAM wParam, LPARA
 				sub_sock.current_state1[i] = 1;//进入下一状态，等待接收验证回复信息
 				sub_sock.subSockArray[i] = temps;
 				tempName.Format("%d", (int)temps);
-				sub_sock.clientName[i] = tempName;
 				MessageBox(CString("accept a connection"), CString("server"), MB_OK);
 				WSAAsyncSelect(temps, m_hWnd, UM_SOCK, FD_READ | FD_CLOSE);
 			}
@@ -529,13 +541,12 @@ LRESULT	Cauthentication_serverDlg::WindowProc(UINT message, WPARAM wParam, LPARA
 						}
 						else{
 							
-							MessageBox(CString("want to recv a file?")+file_abstract.filepath, CString("server"), MB_OK);
-							//更新TTRB
-							indexOfTTRB = findFreeTTRB();
-							ttrb.clientName[indexOfTTRB] = sub_sock.clientName[i];
-							ttrb.filepath[indexOfTTRB].Format(_T("./recvfile/%s"), file_abstract.filepath);
-							ttrb.filesize[indexOfTTRB] = file_abstract.filesize;
-							ttrb.count += 1;
+							//更新ttrb_recv
+							indexOfTTRB = findFreeTTRB(&ttrb_recv);
+							ttrb_recv.clientName[indexOfTTRB] = sub_sock.clientName[i];
+							ttrb_recv.filepath[indexOfTTRB].Format(_T("./recvfile/%s"), file_abstract.filepath);
+							ttrb_recv.filesize[indexOfTTRB] = file_abstract.filesize;
+							ttrb_recv.count += 1;
 
 							//将CurrentClient更新为此client
 							int nIndex = CurrentClient.FindStringExact(0, sub_sock.clientName[i] + CString("\r\n"));
@@ -549,8 +560,22 @@ LRESULT	Cauthentication_serverDlg::WindowProc(UINT message, WPARAM wParam, LPARA
 				else if(1 == sub_sock.current_state1[i]){
 					if (type_result == data_from_client.Type){
 						//处理客户机验证回复信息
-						if (2048 == data_from_client.queryResult){//通过验证
+						if (2048 == data_from_client.queryResult){//通过验证（暂时模拟验证计算结果，待完善！！）
+							//更新对应客户状态
 							sub_sock.current_state1[i] = 2;//进入工作状态
+							int k;
+							for (k = 0; k < maxSubSockNum; k++){
+								if (sub_sock.subSockArray[k] != 0){
+									if (sub_sock.clientName[k] == data_from_client.clientName){
+										//To do 
+										//提示客户机重名登录
+										return 0;
+										break;
+									}
+								}
+							}
+							sub_sock.clientName[i] = data_from_client.clientName;//更新为正式用户名
+							
 							//发送验证结果
 							sub_sock.data_to_client[i].Type = type_reply;
 							sub_sock.data_to_client[i].content = valid;
@@ -633,24 +658,47 @@ LRESULT	Cauthentication_serverDlg::WindowProc(UINT message, WPARAM wParam, LPARA
 				MessageBox(CString("fail to accept a file connection!"), CString("server"), MB_OK);
 			}
 			else{
-					indexOfTTRB = searchTTRB(sub_sock.clientName[0]);//待完善!!!!
-					ttrb.transock[indexOfTTRB] = temps;
 					MessageBox(CString("accept a file connection!"), CString("server"), MB_OK);
-					WSAAsyncSelect(temps, m_hWnd, UM_SOCK_TRANS, FD_READ | FD_CLOSE);
+					WSAAsyncSelect(temps, m_hWnd, UM_SOCK_TRANS, FD_READ | FD_CLOSE);						
 			}
 
 			break;
 		case FD_READ:
+			indexOfTTRB = searchTTRB(&ttrb_recv, s);
+			if (indexOfTTRB == -1){//在ttrb_recv中匹配传输子套接字信息，文件传输初始阶段无该信息，依次作为判断依据
+				len = recv(s, (char *)&file_trans_head, sizeof(file_trans_head), 0);
+				if (len <= 0){
+					//MessageBox(CString("failed to recv file!"), CString("server"), MB_OK);
+					return 0;
+				}
+				else{
+					if(file_trans_head.transType == transType_download){
+						indexOfTTRB = searchTTRB(&ttrb_send, file_trans_head.clientName);
+						ttrb_send.transock[indexOfTTRB] = s;
+						retval = sendFile(indexOfTTRB);//发送文件
 
-			indexOfTTRB = searchTTRB(s);
-			if (indexOfTTRB == -1) return 0;//如果子套接字非法，则拒绝接收
+						return 0;
+					}
+					else if(file_trans_head.transType == transType_upload){
+						tempBuf.Format(_T("%s"), file_trans_head.clientName);
+						indexOfTTRB = searchTTRB(&ttrb_recv, tempBuf);
+						ttrb_recv.transock[indexOfTTRB] = s;
+						MessageBox(CString("want to recv a file?") + ttrb_recv.filepath[indexOfTTRB], CString("server"), MB_OK);
+					}
+					else {
+						return 0;
+					}
+				}
+			}
+
+
 			len = recv(s, buf, bufSize, 0);
 			if (len <= 0){
 				retval = WSAGetLastError();
 				if (retval != WSAEWOULDBLOCK){
 					closesocket(s);//关闭子套接字
-					deleteTTRB(indexOfTTRB);//销毁指定ttrb元素
-					MessageBox(CString("failed to recv file!"), CString("server"), MB_OK);
+					deleteTTRB(&ttrb_recv, indexOfTTRB);//销毁指定ttrb_recv元素
+					//MessageBox(CString("failed to recv file!"), CString("server"), MB_OK);
 					break;
 				}
 				else
@@ -663,7 +711,7 @@ LRESULT	Cauthentication_serverDlg::WindowProc(UINT message, WPARAM wParam, LPARA
 				DWORD dwWrite;
 				bool bRet;
 				//保存文件
-				HANDLE hFile = CreateFile(ttrb.filepath[indexOfTTRB], GENERIC_WRITE, FILE_SHARE_WRITE, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+				HANDLE hFile = CreateFile(ttrb_recv.filepath[indexOfTTRB], GENERIC_WRITE, FILE_SHARE_WRITE, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
 				if (hFile == INVALID_HANDLE_VALUE) return 0;
 				SetFilePointer(hFile, 0, NULL, FILE_END);
 				bRet = WriteFile(hFile, buf, len, &dwWrite, NULL);
@@ -672,16 +720,19 @@ LRESULT	Cauthentication_serverDlg::WindowProc(UINT message, WPARAM wParam, LPARA
 
 				}
 				else{
-					//MessageBox(CString("write file success!"), CString("server"), MB_OK);
+
 				}
 				CloseHandle(hFile);
 				
-				ttrb.filesize[indexOfTTRB] -= len;//更新待接收文件大小
-				if (ttrb.filesize[indexOfTTRB] <= 0){//文件接收完整
-					closesocket(s);//关闭子套接字
-					deleteTTRB(indexOfTTRB);//销毁指定ttrb元素
+				ttrb_recv.filesize[indexOfTTRB] -= len;//更新待接收文件大小
+				if (ttrb_recv.filesize[indexOfTTRB] <= 0){//文件接收完整
+					if (searchTTRB(&ttrb_send, s) == -1){//如果该子套接字不在ttrb_send队列，即未正在发送文件
+						closesocket(s);//关闭子套接字
+					}
+					deleteTTRB(&ttrb_recv, indexOfTTRB);//销毁指定ttrb_recv元素
 					
-					
+					MessageBox(CString("write file success!"), CString("server"), MB_OK);
+
 					//通知对方成功接收文件
 					//To do？？？？？？？？？？？？？？？？
 				}
@@ -690,6 +741,15 @@ LRESULT	Cauthentication_serverDlg::WindowProc(UINT message, WPARAM wParam, LPARA
 
 			break;
 		case FD_CLOSE:
+			//销毁对应文件传输子套接字上的TTRB
+			indexOfTTRB = searchTTRB(&ttrb_recv, s);
+			if (indexOfTTRB != -1){
+				deleteTTRB(&ttrb_recv, indexOfTTRB);
+			}
+			indexOfTTRB = searchTTRB(&ttrb_send, s);
+			if (indexOfTTRB != -1){
+				deleteTTRB(&ttrb_send, indexOfTTRB);
+			}
 			break;
 		}
 		break;
@@ -775,9 +835,98 @@ void Cauthentication_serverDlg::OnCbnDropdownCurrentClient()
 
 void Cauthentication_serverDlg::OnBnClickedButtonUploadfile()
 {
-	// TODO: Add your control notification handler code here
-}
+	int indexOfTTRB;
+	if (main_sock.current_state0 == 1){
+		if (sub_sock.count > 0){
+			int len, retval, i, nIndex;
+			UpdateData(TRUE);
+			SOCKET tempS = 0;
+			CString tempName;
+			CString tempBuf;
+			nIndex = CurrentClient.GetCurSel();//current sel
+			CurrentClient.GetLBText(nIndex, tempName);
+			for (i = 0; i < maxSubSockNum; i++){
+				if (tempName == (sub_sock.clientName[i] + CString("\r\n"))){
+					tempS = sub_sock.subSockArray[i];
+					break;
+				}
+			}
 
+			if (2 == sub_sock.current_state1[i]){//判断是否处于工作状态
+				CString filepath = "./sendfile/server.txt";//待完善，需改成灵活的文件路径名
+				LONG32 fileSize;
+				HANDLE hFile = CreateFile(filepath, GENERIC_READ, 0, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+				if (hFile == INVALID_HANDLE_VALUE){
+					MessageBox(CString("read file error! fail to upload!"), CString("server"), MB_OK);
+					return;
+				}
+				fileSize = GetFileSize(hFile, NULL);
+				CloseHandle(hFile);
+
+				file_abstract.filepath[0] = 's';
+				file_abstract.filepath[1] = 'e';
+				file_abstract.filepath[2] = 'r';
+				file_abstract.filepath[3] = 'v';
+				file_abstract.filepath[4] = 'e';
+				file_abstract.filepath[5] = 'r';
+				file_abstract.filepath[6] = '.';
+				file_abstract.filepath[7] = 't';
+				file_abstract.filepath[8] = 'x';
+				file_abstract.filepath[9] = 't';
+				file_abstract.filepath[10] = '\0';
+				file_abstract.filesize = fileSize;
+				len = 11;
+				if (0 != len){
+					sub_sock.data_to_client[i].Type = type_upload_DataToClient;
+					retval = send(sub_sock.subSockArray[i], (char*)&sub_sock.data_to_client[i], sizeof(sub_sock.data_to_client[i]), 0);
+					retval = send(sub_sock.subSockArray[i], (char*)&file_abstract, sizeof(file_abstract), 0);
+					if (retval == -1){
+						retval = WSAGetLastError();
+						if (retval != WSAEWOULDBLOCK){
+							closesocket(sub_sock.subSockArray[i]);
+							sub_sock.current_state1[i] = 0;
+							sub_sock.subSockArray[i] = 0;
+							sub_sock.clientName[i] = _T("");
+							sub_sock.clientDlg[i] = _T("");
+							sub_sock.count -= 1;
+						}
+					}
+					else{
+						//更新TTRB
+						indexOfTTRB = findFreeTTRB(&ttrb_send);
+						ttrb_send.clientName[indexOfTTRB] = sub_sock.clientName[i];
+						ttrb_send.filepath[indexOfTTRB].Format(_T("./sendfile/%s"), file_abstract.filepath);
+						ttrb_send.filesize[indexOfTTRB] = file_abstract.filesize;
+						ttrb_send.count += 1;
+						
+						//判断对应文件传输子套接字是否有效
+						if (-1 != searchTTRB(&ttrb_recv, ttrb_send.clientName[indexOfTTRB])){
+							//有效
+							retval = sendFile(indexOfTTRB);
+						}
+
+
+					}
+
+				}
+				else{
+					MessageBox(CString("You haven`t chosen any file to upload!"), CString("client"), MB_OK);
+				}
+
+
+			}
+			else{
+				MessageBox(CString("can't upload file to this invalid client!"), CString("server"), MB_OK);
+			}
+		}
+		else{
+			MessageBox(CString("client list is empty!"), CString("server"), MB_OK);
+		}
+	}
+	else{
+		MessageBox(CString("server hasn`t been started!"), CString("server"), MB_OK);
+	}
+}
 
 void Cauthentication_serverDlg::OnBnClickedButtonDownloadfile()
 {
@@ -816,11 +965,9 @@ int Cauthentication_serverDlg::startTranServer()
 				return -1;
 			}
 			else{
-				MessageBox(CString("start server success for file transfer!"), CString("server"), MB_OK);
 			}
 		}
 		else{
-			MessageBox(CString("start server success for file transfer!"), CString("server"), MB_OK);
 		}
 	}
 	else{
@@ -829,53 +976,93 @@ int Cauthentication_serverDlg::startTranServer()
 	return 0;
 }
 
-int Cauthentication_serverDlg::initTTRB(){
+int Cauthentication_serverDlg::initTTRB(struct TTRB * ttrb){
 	char i;
-	ttrb.count = 0;
+	ttrb->count = 0;
 	for (i = 0; i < maxNumOfTTRB; i++){
-		ttrb.clientName[i] = _T("");
-		ttrb.transock[i] = 0;
-		ttrb.filepath[i] = _T("");
-		ttrb.filesize[i] = 0;
+		ttrb->clientName[i] = _T("");
+		ttrb->transock[i] = 0;
+		ttrb->filepath[i] = _T("");
+		ttrb->filesize[i] = 0;
 	}
 	return 0;
 }
 
-int Cauthentication_serverDlg::deleteTTRB(int index){
-	ttrb.count -= 1;
-	ttrb.clientName[index] = _T("");
-	ttrb.transock[index] = 0;
-	ttrb.filepath[index] = _T("");
-	ttrb.filesize[index] = 0;
+int Cauthentication_serverDlg::deleteTTRB(struct TTRB * ttrb, int index){
+	ttrb->count -= 1;
+	ttrb->clientName[index] = _T("");
+	ttrb->transock[index] = 0;
+	ttrb->filepath[index] = _T("");
+	ttrb->filesize[index] = 0;
 	return 0;
 }
 
-int Cauthentication_serverDlg::searchTTRB(SOCKET s){
+int Cauthentication_serverDlg::searchTTRB(struct TTRB * ttrb, SOCKET s){
 	int i;
 	for (i = 0; i < maxNumOfTTRB; i++){
-		if (ttrb.transock[i] == s){
+		if (ttrb->transock[i] == s){
 			return i;
 		}
 	}
 	return -1;
 }
 
-int Cauthentication_serverDlg::searchTTRB(CString clientName){
+int Cauthentication_serverDlg::searchTTRB(struct TTRB * ttrb, CString clientName){
 	int i;
 	for (i = 0; i < maxNumOfTTRB; i++){
-		if (ttrb.clientName[i] == clientName){
+		if (ttrb->clientName[i] == clientName){
 			return i;
 		}
 	}
 	return -1;
 }
 
-int Cauthentication_serverDlg::findFreeTTRB(){
+int Cauthentication_serverDlg::findFreeTTRB(struct TTRB * ttrb){
 	int i;
 	for (i = 0; i < maxNumOfTTRB; i++){
-		if (ttrb.transock[i] == 0){
+		if (ttrb->transock[i] == 0){
 			return i;
 		}
 	}
 	return -1;
+}
+
+int Cauthentication_serverDlg::sendFile(int indexOfTTRB){
+	int retval;
+	HANDLE hFile = CreateFile(ttrb_send.filepath[indexOfTTRB], GENERIC_READ, 0, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+	if (hFile == INVALID_HANDLE_VALUE){
+		MessageBox(CString("read file error! fail to upload!"), CString("server"), MB_OK);
+		return 0;
+	}
+
+	DWORD dwRead;
+	char *sendFileBuf = new char[ttrb_send.filesize[indexOfTTRB]];
+	bool bRet = ReadFile(hFile, sendFileBuf, ttrb_send.filesize[indexOfTTRB], &dwRead, NULL);
+	if (bRet == FALSE){
+		MessageBox(CString("fail to read the file: ") + file_abstract.filepath, CString("client"), MB_OK);
+	}
+	else if (dwRead == 0){//实际读取字节数
+		MessageBox(CString("fail to read the file: ") + file_abstract.filepath, CString("client"), MB_OK);
+	}
+	else{
+
+		retval = send(ttrb_send.transock[indexOfTTRB], sendFileBuf, dwRead, 0);
+		if (retval == -1){
+			retval = WSAGetLastError();
+			if (retval != WSAEWOULDBLOCK){
+				closesocket(ttrb_send.transock[indexOfTTRB]);
+				deleteTTRB(&ttrb_send, indexOfTTRB);
+				MessageBox(CString("file transfer error!"), CString("client"), MB_OK);
+			}
+		}
+		else{
+			if (-1 == searchTTRB(&ttrb_recv, ttrb_send.transock[indexOfTTRB])){//判断该文件传输子套接字是否正在接收文件
+				deleteTTRB(&ttrb_send, indexOfTTRB);
+			}
+			MessageBox(CString("file transfer success!"), CString("client"), MB_OK);
+
+		}
+	}
+	CloseHandle(hFile);	
+	return 0;
 }

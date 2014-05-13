@@ -36,6 +36,7 @@ public:
 	afx_msg void OnBnClickedButtonStopconnect();
 	afx_msg void OnBnClickedButtonSendmsg();
 	int Cauthentication_clientDlg::startTransConnect();
+	CString clientName;
 	UINT password;
 	CIPAddressCtrl RemoteIP;
 	SHORT RemotePort;
@@ -56,6 +57,7 @@ public:
 		#define type_query 0
 		#define type_reply 1
 		#define type_chat_DataFromServer  2
+		#define type_upload_DataFromServer 3
 		#define valid CString("valid")
 		#define invalid CString("invalid")
 		char Type;
@@ -72,7 +74,9 @@ public:
 		#define type_result 0
 		#define type_chat_DataToServer 1
 		#define type_upload_DataToServer 2
+		#define maxNumOfClientName 20
 		char Type;
+		char clientName[maxNumOfClientName];
 		UINT queryResult;
 		CString content;
 	};
@@ -83,7 +87,17 @@ public:
 		char filepath[100];
 		LONG32 filesize;
 	};
-	struct FileAbstract file_abstract;
+	struct FileAbstract file_abstract_send, file_abstract_recv;
+
+	/*file transfer head*/
+	struct fileTransHead
+	{
+		#define transType_upload 0
+		#define transType_download 1
+		char clientName[maxNumOfClientName];
+		char transType;
+	};
+	struct fileTransHead file_trans_head;
 
 /*	typedef enum{
 		STATE0 = 0,//³õÊ¼×´Ì¬
