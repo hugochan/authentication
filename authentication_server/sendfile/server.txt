@@ -357,7 +357,7 @@ LRESULT	Cauthentication_serverDlg::WindowProc(UINT message, WPARAM wParam, LPARA
 	int Event;
 	sockaddr_in remote;
 	int retval;
-	//USHORT lineNum, countPerLine = 25;
+	USHORT lineNum, countPerLine = 25;
 	const UINT bufSize = 4096;
 	char buf[bufSize], i;
 	int len;
@@ -659,12 +659,13 @@ LRESULT	Cauthentication_serverDlg::WindowProc(UINT message, WPARAM wParam, LPARA
 			}
 			else{
 					MessageBox(CString("accept a file connection!"), CString("server"), MB_OK);
-					WSAAsyncSelect(temps, m_hWnd, UM_SOCK_TRANS, FD_READ | FD_CLOSE);						
+					WSAAsyncSelect(temps, m_hWnd, UM_SOCK_TRANS, FD_READ | FD_CLOSE);
+
+							
 			}
 
 			break;
 		case FD_READ:
-			//读取文件头部信息，决定后续操作
 			indexOfTTRB = searchTTRB(&ttrb_recv, s);
 			if (indexOfTTRB == -1){//在ttrb_recv中匹配传输子套接字信息，文件传输初始阶段无该信息，依次作为判断依据
 				len = recv(s, (char *)&file_trans_head, sizeof(file_trans_head), 0);
@@ -675,22 +676,14 @@ LRESULT	Cauthentication_serverDlg::WindowProc(UINT message, WPARAM wParam, LPARA
 				else{
 					if(file_trans_head.transType == transType_download){
 						indexOfTTRB = searchTTRB(&ttrb_send, file_trans_head.clientName);
-						if (indexOfTTRB < 0){
-							MessageBox(CString("unknown error!"), CString("server"), MB_OK);
-							return 0;
-						}
 						ttrb_send.transock[indexOfTTRB] = s;
-						retval = sendFile(indexOfTTRB);//发送文件
+						retval = sendFile(indexOfTTRB);
 
 						return 0;
 					}
 					else if(file_trans_head.transType == transType_upload){
 						tempBuf.Format(_T("%s"), file_trans_head.clientName);
 						indexOfTTRB = searchTTRB(&ttrb_recv, tempBuf);
-						if (indexOfTTRB < 0){
-							MessageBox(CString("unknown error!"), CString("server"), MB_OK);
-							return 0;
-						}
 						ttrb_recv.transock[indexOfTTRB] = s;
 						MessageBox(CString("want to recv a file?") + ttrb_recv.filepath[indexOfTTRB], CString("server"), MB_OK);
 					}
@@ -700,7 +693,7 @@ LRESULT	Cauthentication_serverDlg::WindowProc(UINT message, WPARAM wParam, LPARA
 				}
 			}
 
-			//若上述判断为接收文件，此处开始接收文件正文
+
 			len = recv(s, buf, bufSize, 0);
 			if (len <= 0){
 				retval = WSAGetLastError();
@@ -862,7 +855,7 @@ void Cauthentication_serverDlg::OnBnClickedButtonUploadfile()
 			}
 
 			if (2 == sub_sock.current_state1[i]){//判断是否处于工作状态
-				CString filepath = "./sendfile/server.txt";//待完善，需改成灵活的文件路径名
+				CString filepath = "./sendfile/client.txt";//待完善，需改成灵活的文件路径名
 				LONG32 fileSize;
 				HANDLE hFile = CreateFile(filepath, GENERIC_READ, 0, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
 				if (hFile == INVALID_HANDLE_VALUE){
@@ -870,14 +863,13 @@ void Cauthentication_serverDlg::OnBnClickedButtonUploadfile()
 					return;
 				}
 				fileSize = GetFileSize(hFile, NULL);
-				CloseHandle(hFile);
 
-				file_abstract.filepath[0] = 's';
-				file_abstract.filepath[1] = 'e';
-				file_abstract.filepath[2] = 'r';
-				file_abstract.filepath[3] = 'v';
-				file_abstract.filepath[4] = 'e';
-				file_abstract.filepath[5] = 'r';
+				file_abstract.filepath[0] = 'c';
+				file_abstract.filepath[1] = 'l';
+				file_abstract.filepath[2] = 'i';
+				file_abstract.filepath[3] = 'e';
+				file_abstract.filepath[4] = 'n';
+				file_abstract.filepath[5] = 't';
 				file_abstract.filepath[6] = '.';
 				file_abstract.filepath[7] = 't';
 				file_abstract.filepath[8] = 'x';
@@ -909,7 +901,7 @@ void Cauthentication_serverDlg::OnBnClickedButtonUploadfile()
 						ttrb_send.count += 1;
 						
 						//判断对应文件传输子套接字是否有效
-						if (-1 != searchTTRB(&ttrb_recv, ttrb_send.clientName[indexOfTTRB])){
+						if ((-1 != searchTTRB(&ttrb_send, ttrb_send.clientName[indexOfTTRB])) || (-1 != searchTTRB(&ttrb_recv, ttrb_send.clientName[indexOfTTRB]))){
 							//有效
 							retval = sendFile(indexOfTTRB);
 						}
@@ -1056,7 +1048,6 @@ int Cauthentication_serverDlg::sendFile(int indexOfTTRB){
 	else{
 
 		retval = send(ttrb_send.transock[indexOfTTRB], sendFileBuf, dwRead, 0);
-		delete sendFileBuf;
 		if (retval == -1){
 			retval = WSAGetLastError();
 			if (retval != WSAEWOULDBLOCK){
@@ -1067,10 +1058,10 @@ int Cauthentication_serverDlg::sendFile(int indexOfTTRB){
 		}
 		else{
 			if (-1 == searchTTRB(&ttrb_recv, ttrb_send.transock[indexOfTTRB])){//判断该文件传输子套接字是否正在接收文件
-				closesocket(ttrb_send.transock[indexOfTTRB]);//若该文件传输子套接字空闲，则回收套接字资源
+				deleteTTRB(&ttrb_send, indexOfTTRB);
 			}
-			deleteTTRB(&ttrb_send, indexOfTTRB);
 			MessageBox(CString("file transfer success!"), CString("client"), MB_OK);
+
 		}
 	}
 	CloseHandle(hFile);	

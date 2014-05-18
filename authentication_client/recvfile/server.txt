@@ -1,0 +1,2752 @@
+
+// authentication_serverDlg.cpp : implementation file
+//
+
+#include "stdafx.h"
+#include "authentication_server.h"
+#include "authentication_serverDlg.h"
+#include "afxdialogex.h"
+
+#ifdef _DEBUG
+#define new DEBUG_NEW
+#endif
+
+#define UM_SOCK WM_USER + 100
+#define UM_SOCK_TRANS WM_USER + 101
+#define WM_POST_CurrentListMSG WM_USER + 2
+#define WM_POST_CurrentClientMSG WM_USER + 3
+// CAboutDlg dialog used for App About
+
+class CAboutDlg : public CDialogEx
+{
+public:
+	CAboutDlg();
+
+// Dialog Data
+	enum { IDD = IDD_ABOUTBOX };
+
+	protected:
+	virtual void DoDataExchange(CDataExchange* pDX);    // DDX/DDV support
+
+// Implementation
+protected:
+	DECLARE_MESSAGE_MAP()
+};
+
+CAboutDlg::CAboutDlg() : CDialogEx(CAboutDlg::IDD)
+{
+}
+
+void CAboutDlg::DoDataExchange(CDataExchange* pDX)
+{
+	CDialogEx::DoDataExchange(pDX);
+}
+
+BEGIN_MESSAGE_MAP(CAboutDlg, CDialogEx)
+END_MESSAGE_MAP()
+
+
+// Cauthentication_serverDlg dialog
+
+
+
+Cauthentication_serverDlg::Cauthentication_serverDlg(CWnd* pParent /*=NULL*/)
+: CDialogEx(Cauthentication_serverDlg::IDD, pParent)
+, LocalPort(8000)
+, password(12345)
+, SendMsgText(_T(""))
+, DisplayText(_T(""))
+, CurrentList(_T(""))
+{
+	//Initialize main_sock
+	main_sock.mainsock = 0;
+	main_sock.current_state0 = 0;//无服务
+	//Initialize tran_sock
+	tran_sock.transock = 0;
+	tran_sock.current_state = 0;//无服务
+	//Initialize sub_sock
+	char i;
+	sub_sock.count = 0;
+	for (i = 0; i < maxSubSockNum; i++){
+		sub_sock.current_state1[i] = 0;
+		sub_sock.subSockArray[i] = 0;
+		sub_sock.clientName[i] = _T("");
+		sub_sock.clientDlg[i] = _T("");
+	}
+
+	//Initialize ttrb_recv
+	initTTRB(&ttrb_recv);
+
+	//Initialize ttrb_send
+	initTTRB(&ttrb_send);
+
+	m_hIcon = AfxGetApp()->LoadIcon(IDR_MAINFRAME);
+}
+
+void Cauthentication_serverDlg::DoDataExchange(CDataExchange* pDX)
+{
+	CDialogEx::DoDataExchange(pDX);
+	DDX_Text(pDX, IDC_EDIT_SETPORT, LocalPort);
+	DDX_Text(pDX, IDC_EDIT_SETPASSWORD, password);
+	DDX_Text(pDX, IDC_EDIT_SENDMSG, SendMsgText);
+	DDX_Text(pDX, IDC_EDIT_DLGDISPLAY, DisplayText);
+	DDX_Text(pDX, IDC_EDIT_CLIENTLIST, CurrentList);
+	DDX_Control(pDX, IDC_COMBO1, CurrentClient);
+}
+
+BEGIN_MESSAGE_MAP(Cauthentication_serverDlg, CDialogEx)
+	ON_WM_SYSCOMMAND()
+	ON_WM_PAINT()
+	ON_WM_QUERYDRAGICON()
+	ON_BN_CLICKED(IDC_BUTTON_STARTSERVER, &Cauthentication_serverDlg::OnBnClickedButtonStartserver)
+	ON_BN_CLICKED(IDC_BUTTON_STOPSERVER, &Cauthentication_serverDlg::OnBnClickedButtonStopserver)
+	ON_CBN_SELCHANGE(IDC_COMBO1, &Cauthentication_serverDlg::OnCbnSelchangeCombo1)
+	ON_BN_CLICKED(IDC_BUTTON_SENDMSG, &Cauthentication_serverDlg::OnBnClickedButtonSendmsg)
+	ON_MESSAGE(WM_POST_CurrentListMSG, &Cauthentication_serverDlg::UpdateCurrentList)
+	ON_MESSAGE(WM_POST_CurrentClientMSG, &Cauthentication_serverDlg::UpdateCurrentClient)
+	ON_CBN_DBLCLK(IDC_COMBO1, &Cauthentication_serverDlg::OnCbnDblclkCurrentClient)
+	ON_CBN_EDITCHANGE(IDC_COMBO1, &Cauthentication_serverDlg::OnCbnEditchangeCurrentClient)
+	ON_CBN_DROPDOWN(IDC_COMBO1, &Cauthentication_serverDlg::OnCbnDropdownCurrentClient)
+	ON_BN_CLICKED(IDC_BUTTON_UPLOADFILE, &Cauthentication_serverDlg::OnBnClickedButtonUploadfile)
+	ON_BN_CLICKED(IDC_BUTTON_DOWNLOADFILE, &Cauthentication_serverDlg::OnBnClickedButtonDownloadfile)
+END_MESSAGE_MAP()
+
+
+// Cauthentication_serverDlg message handlers
+
+BOOL Cauthentication_serverDlg::OnInitDialog()
+{
+	CDialogEx::OnInitDialog();
+
+	// Add "About..." menu item to system menu.
+
+	// IDM_ABOUTBOX must be in the system command range.
+	ASSERT((IDM_ABOUTBOX & 0xFFF0) == IDM_ABOUTBOX);
+	ASSERT(IDM_ABOUTBOX < 0xF000);
+
+	CMenu* pSysMenu = GetSystemMenu(FALSE);
+	if (pSysMenu != NULL)
+	{
+		BOOL bNameValid;
+		CString strAboutMenu;
+		bNameValid = strAboutMenu.LoadString(IDS_ABOUTBOX);
+		ASSERT(bNameValid);
+		if (!strAboutMenu.IsEmpty())
+		{
+			pSysMenu->AppendMenu(MF_SEPARATOR);
+			pSysMenu->AppendMenu(MF_STRING, IDM_ABOUTBOX, strAboutMenu);
+		}
+	}
+
+	// Set the icon for this dialog.  The framework does this automatically
+	//  when the application's main window is not a dialog
+	SetIcon(m_hIcon, TRUE);			// Set big icon
+	SetIcon(m_hIcon, FALSE);		// Set small icon
+
+	// TODO: Add extra initialization here
+
+	return TRUE;  // return TRUE  unless you set the focus to a control
+}
+
+void Cauthentication_serverDlg::OnSysCommand(UINT nID, LPARAM lParam)
+{
+	if ((nID & 0xFFF0) == IDM_ABOUTBOX)
+	{
+		CAboutDlg dlgAbout;
+		dlgAbout.DoModal();
+	}
+	else
+	{
+		CDialogEx::OnSysCommand(nID, lParam);
+	}
+}
+
+// If you add a minimize button to your dialog, you will need the code below
+//  to draw the icon.  For MFC applications using the document/view model,
+//  this is automatically done for you by the framework.
+
+void Cauthentication_serverDlg::OnPaint()
+{
+	if (IsIconic())
+	{
+		CPaintDC dc(this); // device context for painting
+
+		SendMessage(WM_ICONERASEBKGND, reinterpret_cast<WPARAM>(dc.GetSafeHdc()), 0);
+
+		// Center icon in client rectangle
+		int cxIcon = GetSystemMetrics(SM_CXICON);
+		int cyIcon = GetSystemMetrics(SM_CYICON);
+		CRect rect;
+		GetClientRect(&rect);
+		int x = (rect.Width() - cxIcon + 1) / 2;
+		int y = (rect.Height() - cyIcon + 1) / 2;
+
+		// Draw the icon
+		dc.DrawIcon(x, y, m_hIcon);
+	}
+	else
+	{
+		CDialogEx::OnPaint();
+	}
+}
+
+// The system calls this function to obtain the cursor to display while the user drags
+//  the minimized window.
+HCURSOR Cauthentication_serverDlg::OnQueryDragIcon()
+{
+	return static_cast<HCURSOR>(m_hIcon);
+}
+
+
+
+
+void Cauthentication_serverDlg::OnBnClickedButtonStartserver()
+{
+	if (main_sock.current_state0 == 0){
+		int retval;
+		sockaddr_in server;
+		WSAData wsa;
+		UpdateData(TRUE);
+		WSAStartup(0x101, &wsa);
+
+		if (LocalPort > 65535){//检查端口号范围
+			MessageBox(CString("port number error!"), CString("server"), MB_OK);
+			return;
+		}
+
+		main_sock.mainsock = socket(AF_INET, SOCK_STREAM, 0);
+
+		server.sin_family = AF_INET;
+		//server.sin_addr.S_un.S_addr = htonl(INADDR_ANY);//绑定所有IP地址
+			server.sin_addr.S_un.S_un_b.s_b1 = 127;
+			server.sin_addr.S_un.S_un_b.s_b2 = 0;
+			server.sin_addr.S_un.S_un_b.s_b3 = 0;
+			server.sin_addr.S_un.S_un_b.s_b4 = 1;
+			
+		server.sin_port = htons(LocalPort);
+
+		retval = bind(main_sock.mainsock, (sockaddr *)&server, sizeof(server));
+		if (retval == -1)
+		{	
+			retval = WSAGetLastError();
+			MessageBox("bind error!", CString("server"), MB_OK);
+			return;
+		}
+		else{
+			retval = listen(main_sock.mainsock, 5);
+			retval = WSAAsyncSelect(main_sock.mainsock, m_hWnd, UM_SOCK, FD_ACCEPT);
+			main_sock.current_state0 = 1;//服务已开启
+			retval = startTranServer();//开启文件传输端口
+			if (retval == -1){
+
+			}
+			else{
+			}
+			
+			MessageBox(CString("start server success!"), CString("server"), MB_OK);
+
+		}
+	}
+	else{
+		MessageBox(CString("server has been started!"), CString("server"), MB_OK);
+	}
+}
+
+
+void Cauthentication_serverDlg::OnBnClickedButtonStopserver()
+{
+	if (main_sock.current_state0 != 0){
+		closesocket(main_sock.mainsock);
+		main_sock.mainsock = 0;
+		main_sock.current_state0 = 0;//服务关闭
+		WSACleanup();
+		sub_sock.count = 0;//flush subSock
+		char i;
+		for (i = 0; i < maxSubSockNum; i++){
+			sub_sock.current_state1[i] = 0;
+			sub_sock.subSockArray[i] = 0;
+			sub_sock.clientName[i] = _T("");
+			sub_sock.clientDlg[i] = _T("");
+		}
+		DisplayText = _T("");
+		UpdateData(FALSE);
+		PostMessage(WM_POST_CurrentListMSG, 0, (LPARAM)(&sub_sock));
+		CurrentClientMsgFlag = 2;
+		SendMessage(WM_POST_CurrentClientMSG, (WPARAM)(&CurrentClientMsgFlag), 0);
+		//server_start.EnableWindow(FALSE);
+	}
+	else{
+		MessageBox(CString("server hasn`t been started!"), CString("server"), MB_OK);
+	}
+}
+
+
+void Cauthentication_serverDlg::OnCbnSelchangeCombo1()
+{
+	// TODO: Add your control notification handler code here
+}
+
+
+void Cauthentication_serverDlg::OnBnClickedButtonSendmsg()
+{
+	if (main_sock.current_state0 == 1){
+		if (sub_sock.count > 0){
+			int len, retval, i, nIndex;
+			UpdateData(TRUE);
+			SOCKET tempS = 0;
+			CString tempName;
+			CString tempBuf;
+			nIndex = CurrentClient.GetCurSel();//current sel
+			CurrentClient.GetLBText(nIndex, tempName);
+			for (i = 0; i < maxSubSockNum; i++){
+				if (tempName == (sub_sock.clientName[i] + CString("\r\n"))){
+					tempS = sub_sock.subSockArray[i];
+					break;
+				}
+			}
+
+			if (2 == sub_sock.current_state1[i]){//判断是否处于工作状态
+				len = SendMsgText.GetLength();
+				if (0 != len){
+					sub_sock.data_to_client[i].Type = type_chat_DataToClient;
+					sub_sock.data_to_client[i].content = SendMsgText;
+					retval = send(tempS, (char*)&(sub_sock.data_to_client[i]), sizeof(sub_sock.data_to_client[i]), 0);
+					retval = send(tempS, (char*)SendMsgText.GetBuffer(0), len, 0);
+					SendMsgText.ReleaseBuffer();
+					if (retval == -1){
+						retval = WSAGetLastError();
+						if (retval != WSAEWOULDBLOCK){
+							closesocket(tempS);
+							sub_sock.current_state1[i] = 0;
+							sub_sock.subSockArray[i] = 0;
+							sub_sock.clientName[i] = _T("");
+							sub_sock.clientDlg[i] = _T("");
+							sub_sock.count -= 1;
+							DisplayText = _T("");
+							UpdateData(FALSE);
+							MessageBox(CString("failed to send! close connection!"), CString("server"), MB_OK);
+						}
+					}
+					else{
+						tempBuf.Format(_T("%s"), CString("我： "));
+						sub_sock.clientDlg[i] += (tempBuf + SendMsgText + CString("\r\n"));
+						DisplayText = sub_sock.clientDlg[i];
+						SendMsgText = _T("");
+						UpdateData(FALSE);
+					}
+				}
+				else{
+					MessageBox(CString("There is no content to send!"), CString("server"), MB_OK);
+				}
+			}
+			else{
+				MessageBox(CString("can't send messages to this invalid client!"), CString("server"), MB_OK);
+			}
+		}
+		else{
+			MessageBox(CString("client list is empty!"), CString("server"), MB_OK);
+		}
+	}
+	else{
+		MessageBox(CString("server hasn`t been started!"), CString("server"), MB_OK);
+	}
+}
+
+LRESULT	Cauthentication_serverDlg::WindowProc(UINT message, WPARAM wParam, LPARAM lParam){
+	SOCKET s, temps;
+	int Event;
+	sockaddr_in remote;
+	int retval;
+	USHORT lineNum, countPerLine = 25;
+	const UINT bufSize = 4096;
+	char buf[bufSize], i;
+	int len;
+	int indexOfTTRB;
+	CString tempName, tempBuf("");
+	CString queryData(""), queryReply("");
+	switch (message){
+	case UM_SOCK:
+		s = (SOCKET)LOWORD(wParam);
+		Event = LOWORD(lParam);
+		switch (Event){
+		case FD_ACCEPT:
+			len = sizeof(remote);
+			temps = accept(s, (sockaddr*)&remote, &len);
+			if (temps == SOCKET_ERROR){
+				closesocket(s);
+				main_sock.current_state0 = 0;
+				main_sock.mainsock = 0;
+				WSACleanup();
+				DisplayText = _T("");
+				UpdateData(FALSE);
+				MessageBox(CString("accept a connection error! please start server again!"), CString("server"), MB_OK);
+				sub_sock.count = 0;
+				char i;
+				for (i = 0; i < maxSubSockNum; i++){
+					sub_sock.current_state1[i] = 0;
+					sub_sock.subSockArray[i] = 0;
+					sub_sock.clientName[i] = _T("");
+					sub_sock.clientDlg[i] = _T("");
+				}
+				PostMessage(WM_POST_CurrentListMSG, 0, (LPARAM)(&sub_sock));
+				CurrentClientMsgFlag = 2;
+				SendMessage(WM_POST_CurrentClientMSG, (WPARAM)(&CurrentClientMsgFlag), 0);
+				break;
+			}
+			else{
+				for (i = 0; i < maxSubSockNum; i++){
+					if (sub_sock.subSockArray[i] == 0){
+						break;
+					}
+				}
+				
+				//发送质询数据
+				//queryData = CString("test to query");
+				//len = queryData.GetLength();
+				//retval = send(temps, (char*)queryData.GetBuffer(0), len, 0);
+				//queryData.ReleaseBuffer();
+				
+				//填写data_to_client（添加质询数据）
+				sub_sock.data_to_client[i].Type = type_query;
+				sub_sock.data_to_client[i].count_2byte = 10;
+				sub_sock.data_to_client[i].count_4byte = 20;
+				sub_sock.data_to_client[i].data_2byte = new USHORT[(const USHORT)sub_sock.data_to_client[i].count_2byte];
+				sub_sock.data_to_client[i].data_4byte = new UINT[(const USHORT)sub_sock.data_to_client[i].count_4byte];
+				//模拟质询数据
+				int k;
+				for (k = 0; k < sub_sock.data_to_client[i].count_2byte; k++){
+					sub_sock.data_to_client[i].data_2byte[k] = (USHORT)k;
+				}
+				for (k = 0; k < sub_sock.data_to_client[i].count_4byte; k++){
+					sub_sock.data_to_client[i].data_4byte[k] = (UINT)k;
+				}
+					
+				sub_sock.data_to_client[i].content = _T("");
+				//send to client(分三次发送)
+				retval = send(temps, (char*)&(sub_sock.data_to_client[i]), sizeof(sub_sock.data_to_client[i]), 0);
+				retval = send(temps, (char*)sub_sock.data_to_client[i].data_2byte, sizeof(USHORT) * sub_sock.data_to_client[i].count_2byte, 0);
+				retval = send(temps, (char*)sub_sock.data_to_client[i].data_4byte, sizeof(UINT) * sub_sock.data_to_client[i].count_4byte, 0);
+				delete sub_sock.data_to_client[i].data_2byte;
+				delete sub_sock.data_to_client[i].data_4byte;
+				if (retval == -1){
+					retval = WSAGetLastError();
+					if (retval != WSAEWOULDBLOCK){//超时处理待补充
+						closesocket(temps);
+						WSACleanup();
+						//更新子套接字管理结构体（回收资源）
+						sub_sock.current_state1[i] = 0;
+						sub_sock.subSockArray[i] = 0;
+						sub_sock.clientName[i] = _T("");
+						sub_sock.clientDlg[i] = _T("");
+						sub_sock.count -= 1;
+						MessageBox(CString("failed to send query datas! close connection!"), CString("server"), MB_OK);
+						break;
+					}
+				}//默认数据发送成功
+				sub_sock.count += 1;
+				sub_sock.current_state1[i] = 1;//进入下一状态，等待接收验证回复信息
+				sub_sock.subSockArray[i] = temps;
+				tempName.Format("%d", (int)temps);
+				MessageBox(CString("accept a connection"), CString("server"), MB_OK);
+				WSAAsyncSelect(temps, m_hWnd, UM_SOCK, FD_READ | FD_CLOSE);
+			}
+			break;
+		case FD_READ:
+			for (i = 0; i < maxSubSockNum; i++){
+				if (sub_sock.subSockArray[i] == s){
+					break;
+				}
+			}
+			len = recv(s, (char*)&data_from_client, sizeof(data_from_client), 0);
+			if (len <= 0){
+				retval = WSAGetLastError();
+				if (retval != WSAEWOULDBLOCK){
+					closesocket(s);//关闭子套接字
+					//更新子套接字管理结构体（回收资源）
+					sub_sock.current_state1[i] = 0;
+					sub_sock.subSockArray[i] = 0;
+					sub_sock.clientName[i] = _T("");
+					sub_sock.clientDlg[i] = _T("");
+					sub_sock.count -= 1;	
+					MessageBox(CString("failed to recv! close connection"), CString("server"), MB_OK);
+					break;
+				}
+				else
+					break;
+			}
+			else{
+				if (2 == sub_sock.current_state1[i]){
+					if (type_chat_DataFromClient == data_from_client.Type){
+						len = recv(s, (char *)buf, bufSize, 0);
+						if (len <= 0){
+							retval = WSAGetLastError();
+							if (retval != WSAEWOULDBLOCK){
+								closesocket(s);//关闭子套接字
+								//更新子套接字管理结构体（回收资源）
+								sub_sock.current_state1[i] = 0;
+								sub_sock.subSockArray[i] = 0;
+								sub_sock.clientName[i] = _T("");
+								sub_sock.clientDlg[i] = _T("");
+								sub_sock.count -= 1;
+								MessageBox(CString("failed to recv! close connection"), CString("server"), MB_OK);
+								break;
+							}
+							else
+								break;
+						}
+						else{
+							//更新聊天对话框内容
+							buf[len] = 0;
+							tempBuf.Format(_T("%s"), buf);
+							tempBuf = sub_sock.clientName[i] + CString("： ") + tempBuf;
+							sub_sock.clientDlg[i] += (tempBuf + CString("\r\n"));
+							DisplayText = sub_sock.clientDlg[i];
+							//将CurrentClient更新为此client
+							
+							int nIndex = CurrentClient.FindStringExact(0, sub_sock.clientName[i] + CString("\r\n"));
+							if (nIndex != -1){
+								CurrentClient.SetCurSel(nIndex);
+							}
+							//arrange the text to make it well organized
+							/*					len = sub_sock.clientDlg[i].GetLength();
+												if (len % countPerLine == 0){
+												lineNum = len / countPerLine;
+												}
+												else lineNum = len / countPerLine + 1;
+												for (i = 0; i < lineNum - 1; i++){
+												DisplayText += (tempBuf.Mid(i*countPerLine, countPerLine) + CString("\r\n"));
+												}
+												DisplayText += tempBuf.Right(len - (lineNum - 1)*countPerLine) + CString("\r\n\r\n");
+												*/
+							UpdateData(FALSE);
+						}
+					}
+					else if (type_upload_DataFromClient == data_from_client.Type){
+						len = recv(s, (char *)&file_abstract, sizeof(file_abstract), 0);
+						if (len <= 0){
+							retval = WSAGetLastError();
+							if (retval != WSAEWOULDBLOCK){
+								closesocket(s);//关闭子套接字
+								//更新子套接字管理结构体（回收资源）
+								sub_sock.current_state1[i] = 0;
+								sub_sock.subSockArray[i] = 0;
+								sub_sock.clientName[i] = _T("");
+								sub_sock.clientDlg[i] = _T("");
+								sub_sock.count -= 1;
+								MessageBox(CString("failed to recv a file! close connection"), CString("server"), MB_OK);
+								break;
+							}
+							else
+								break;
+						}
+						else{
+							
+							//更新ttrb_recv
+							indexOfTTRB = findFreeTTRB(&ttrb_recv);
+							ttrb_recv.clientName[indexOfTTRB] = sub_sock.clientName[i];
+							ttrb_recv.filepath[indexOfTTRB].Format(_T("./recvfile/%s"), file_abstract.filepath);
+							ttrb_recv.filesize[indexOfTTRB] = file_abstract.filesize;
+							ttrb_recv.count += 1;
+
+							//将CurrentClient更新为此client
+							int nIndex = CurrentClient.FindStringExact(0, sub_sock.clientName[i] + CString("\r\n"));
+							if (nIndex != -1){
+								CurrentClient.SetCurSel(nIndex);
+							}
+						}
+					}
+					
+				}
+				else if(1 == sub_sock.current_state1[i]){
+					if (type_result == data_from_client.Type){
+						//处理客户机验证回复信息
+						if (2048 == data_from_client.queryResult){//通过验证（暂时模拟验证计算结果，待完善！！）
+							//更新对应客户状态
+							sub_sock.current_state1[i] = 2;//进入工作状态
+							int k;
+							for (k = 0; k < maxSubSockNum; k++){
+								if (sub_sock.subSockArray[k] != 0){
+									if (sub_sock.clientName[k] == data_from_client.clientName){
+										//To do 
+										//提示客户机重名登录
+										return 0;
+										break;
+									}
+								}
+							}
+							sub_sock.clientName[i] = data_from_client.clientName;//更新为正式用户名
+							
+							//发送验证结果
+							sub_sock.data_to_client[i].Type = type_reply;
+							sub_sock.data_to_client[i].content = valid;
+							//分两次发送
+							retval = send(s, (char*)&(sub_sock.data_to_client[i]), sizeof(sub_sock.data_to_client[i]), 0);
+							retval = send(s, (char*)sub_sock.data_to_client[i].content.GetBuffer(0), sub_sock.data_to_client[i].content.GetLength(), 0);
+							sub_sock.data_to_client[i].content.ReleaseBuffer();
+							if (retval == -1){
+								retval = WSAGetLastError();
+								if (retval != WSAEWOULDBLOCK){
+									closesocket(s);
+									//更新子套接字管理结构体（回收资源）
+									sub_sock.current_state1[i] = 0;
+									sub_sock.subSockArray[i] = 0;
+									sub_sock.clientName[i] = _T("");
+									sub_sock.clientDlg[i] = _T("");
+									sub_sock.count -= 1;
+									WSACleanup();
+									break;
+								}
+							}
+							//更新currentlist currentclient
+							PostMessage(WM_POST_CurrentListMSG, 0, (LPARAM)(&sub_sock));
+							CurrentClientMsgFlag = 0;
+							tempName = sub_sock.clientName[i];
+							SendMessage(WM_POST_CurrentClientMSG, (WPARAM)(&CurrentClientMsgFlag), (LPARAM)(&tempName));
+							MessageBox(CString("accept a valid connection!"), CString("server"), MB_OK);
+						}
+						else{//未通过验证
+							closesocket(s);
+							//更新子套接字管理结构体（回收资源）
+							sub_sock.current_state1[i] = 0;
+							sub_sock.subSockArray[i] = 0;
+							sub_sock.clientName[i] = _T("");
+							sub_sock.clientDlg[i] = _T("");
+							sub_sock.count -= 1;
+							WSACleanup();
+							break;
+
+						}
+					}
+					else{
+						//To do
+					}
+				}
+				else{
+					//To do
+				}
+
+			}
+			break;
+		case FD_CLOSE:
+			closesocket(s);//close the sub-sock
+			for (i = 0; i < maxSubSockNum; i++){
+				if (sub_sock.subSockArray[i] == s){
+					sub_sock.subSockArray[i] = 0;
+					sub_sock.clientName[i] = _T("");
+					sub_sock.count -= 1;
+					break;
+				}
+			}
+			PostMessage(WM_POST_CurrentListMSG, 0, (LPARAM)(&sub_sock));
+			tempName.Format("%d", (int)s);
+			CurrentClientMsgFlag = 1;
+			SendMessage(WM_POST_CurrentClientMSG, (WPARAM)(&CurrentClientMsgFlag), (LPARAM)(&tempName));
+			break;
+		}
+		break;
+	case UM_SOCK_TRANS:
+		s = (SOCKET)LOWORD(wParam);
+		Event = LOWORD(lParam);
+		switch (Event){
+		case FD_ACCEPT:
+			len = sizeof(remote);
+			temps = accept(s, (sockaddr*)&remote, &len);
+			if (temps == SOCKET_ERROR){
+				closesocket(s);
+				tran_sock.transock = 0;
+				tran_sock.current_state = 0;
+				MessageBox(CString("fail to accept a file connection!"), CString("server"), MB_OK);
+			}
+			else{
+					MessageBox(CString("accept a file connection!"), CString("server"), MB_OK);
+					WSAAsyncSelect(temps, m_hWnd, UM_SOCK_TRANS, FD_READ | FD_CLOSE);
+
+							
+			}
+
+			break;
+		case FD_READ:
+			indexOfTTRB = searchTTRB(&ttrb_recv, s);
+			if (indexOfTTRB == -1){//在ttrb_recv中匹配传输子套接字信息，文件传输初始阶段无该信息，依次作为判断依据
+				len = recv(s, (char *)&file_trans_head, sizeof(file_trans_head), 0);
+				if (len <= 0){
+					//MessageBox(CString("failed to recv file!"), CString("server"), MB_OK);
+					return 0;
+				}
+				else{
+					if(file_trans_head.transType == transType_download){
+						indexOfTTRB = searchTTRB(&ttrb_send, file_trans_head.clientName);
+						ttrb_send.transock[indexOfTTRB] = s;
+						retval = sendFile(indexOfTTRB);
+
+						return 0;
+					}
+					else if(file_trans_head.transType == transType_upload){
+						tempBuf.Format(_T("%s"), file_trans_head.clientName);
+						indexOfTTRB = searchTTRB(&ttrb_recv, tempBuf);
+						ttrb_recv.transock[indexOfTTRB] = s;
+						MessageBox(CString("want to recv a file?") + ttrb_recv.filepath[indexOfTTRB], CString("server"), MB_OK);
+					}
+					else {
+						return 0;
+					}
+				}
+			}
+
+
+			len = recv(s, buf, bufSize, 0);
+			if (len <= 0){
+				retval = WSAGetLastError();
+				if (retval != WSAEWOULDBLOCK){
+					closesocket(s);//关闭子套接字
+					deleteTTRB(&ttrb_recv, indexOfTTRB);//销毁指定ttrb_recv元素
+					//MessageBox(CString("failed to recv file!"), CString("server"), MB_OK);
+					break;
+				}
+				else
+					break;
+			}
+			else{
+				if (len < bufSize){
+					buf[len] = '\0';
+				}
+				DWORD dwWrite;
+				bool bRet;
+				//保存文件
+				HANDLE hFile = CreateFile(ttrb_recv.filepath[indexOfTTRB], GENERIC_WRITE, FILE_SHARE_WRITE, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+				if (hFile == INVALID_HANDLE_VALUE) return 0;
+				SetFilePointer(hFile, 0, NULL, FILE_END);
+				bRet = WriteFile(hFile, buf, len, &dwWrite, NULL);
+				if (bRet == FALSE){
+					MessageBox(CString("write file error!"), CString("server"), MB_OK);
+
+				}
+				else{
+
+				}
+				CloseHandle(hFile);
+				
+				ttrb_recv.filesize[indexOfTTRB] -= len;//更新待接收文件大小
+				if (ttrb_recv.filesize[indexOfTTRB] <= 0){//文件接收完整
+					if (searchTTRB(&ttrb_send, s) == -1){//如果该子套接字不在ttrb_send队列，即未正在发送文件
+						closesocket(s);//关闭子套接字
+					}
+					deleteTTRB(&ttrb_recv, indexOfTTRB);//销毁指定ttrb_recv元素
+					
+					MessageBox(CString("write file success!"), CString("server"), MB_OK);
+
+					//通知对方成功接收文件
+					//To do？？？？？？？？？？？？？？？？
+				}
+
+			}
+
+			break;
+		case FD_CLOSE:
+			//销毁对应文件传输子套接字上的TTRB
+			indexOfTTRB = searchTTRB(&ttrb_recv, s);
+			if (indexOfTTRB != -1){
+				deleteTTRB(&ttrb_recv, indexOfTTRB);
+			}
+			indexOfTTRB = searchTTRB(&ttrb_send, s);
+			if (indexOfTTRB != -1){
+				deleteTTRB(&ttrb_send, indexOfTTRB);
+			}
+			break;
+		}
+		break;
+	}
+	return CDialogEx::WindowProc(message, wParam, lParam);//为什么这里需要调用？？
+}
+
+LRESULT Cauthentication_serverDlg::UpdateCurrentList(WPARAM wParam, LPARAM lParam)
+{
+	struct subSock * tempSock = (struct subSock *)lParam;
+	CurrentList = _T("");
+	char i, j = 0;
+	for (i = 0; i < maxSubSockNum; i++){
+		if (tempSock->subSockArray[i] != 0){
+			CurrentList += (tempSock->clientName[i] + CString("\r\n"));
+			j++;
+		}
+		if (j == tempSock->count) break;
+	}
+	UpdateData(FALSE);
+	return 0;
+}
+
+LRESULT Cauthentication_serverDlg::UpdateCurrentClient(WPARAM wParam, LPARAM lParam)
+{
+	char tempFlag = *(char *)wParam;
+	int nIndex, nIndex1;
+	CString tempName;
+	if (0 == tempFlag){//add
+		tempName = *(CString *)lParam;
+		CurrentClient.AddString(tempName + CString("\r\n"));
+		nIndex = CurrentClient.FindStringExact(0, tempName + CString("\r\n"));
+		if (nIndex == CB_ERR) return 0;
+		CurrentClient.SetCurSel(nIndex);
+	}
+	else if (1 == tempFlag){//delete
+		tempName = *(CString *)lParam;
+		nIndex = CurrentClient.FindStringExact(0, tempName + CString("\r\n"));
+		if (nIndex != -1){
+			CurrentClient.DeleteString((UINT)nIndex);
+			nIndex1 = CurrentClient.GetCurSel();//current sel
+			if ((CurrentClient.GetCount() == 0)||(nIndex1 == -1)){
+				CurrentClient.SetCurSel(0);
+			}
+		}
+	}
+	else if (2 == tempFlag){
+		if (0 != CurrentClient.GetCount()){
+			CurrentClient.ResetContent();
+		}
+	}
+	else
+	{
+		//Todo
+	}
+	UpdateData(FALSE);
+	return 0;
+}
+
+
+void Cauthentication_serverDlg::OnCbnDblclkCurrentClient()
+{
+	if (CurrentClient.GetCount() != 0){
+		CurrentClient.ShowDropDown(TRUE);
+	}
+}
+
+
+void Cauthentication_serverDlg::OnCbnEditchangeCurrentClient()
+{
+	// TODO: Add your control notification handler code here
+}
+
+
+void Cauthentication_serverDlg::OnCbnDropdownCurrentClient()
+{
+	// TODO: Add your control notification handler code here
+	if (CurrentClient.GetCount() != 0){
+		//CurrentClient.ShowDropDown(TRUE);
+	}
+}
+
+
+void Cauthentication_serverDlg::OnBnClickedButtonUploadfile()
+{
+	int indexOfTTRB;
+	if (main_sock.current_state0 == 1){
+		if (sub_sock.count > 0){
+			int len, retval, i, nIndex;
+			UpdateData(TRUE);
+			SOCKET tempS = 0;
+			CString tempName;
+			CString tempBuf;
+			nIndex = CurrentClient.GetCurSel();//current sel
+			CurrentClient.GetLBText(nIndex, tempName);
+			for (i = 0; i < maxSubSockNum; i++){
+				if (tempName == (sub_sock.clientName[i] + CString("\r\n"))){
+					tempS = sub_sock.subSockArray[i];
+					break;
+				}
+			}
+
+			if (2 == sub_sock.current_state1[i]){//判断是否处于工作状态
+				CString filepath = "./sendfile/client.txt";//待完善，需改成灵活的文件路径名
+				LONG32 fileSize;
+				HANDLE hFile = CreateFile(filepath, GENERIC_READ, 0, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+				if (hFile == INVALID_HANDLE_VALUE){
+					MessageBox(CString("read file error! fail to upload!"), CString("server"), MB_OK);
+					return;
+				}
+				fileSize = GetFileSize(hFile, NULL);
+
+				file_abstract.filepath[0] = 'c';
+				file_abstract.filepath[1] = 'l';
+				file_abstract.filepath[2] = 'i';
+				file_abstract.filepath[3] = 'e';
+				file_abstract.filepath[4] = 'n';
+				file_abstract.filepath[5] = 't';
+				file_abstract.filepath[6] = '.';
+				file_abstract.filepath[7] = 't';
+				file_abstract.filepath[8] = 'x';
+				file_abstract.filepath[9] = 't';
+				file_abstract.filepath[10] = '\0';
+				file_abstract.filesize = fileSize;
+				len = 11;
+				if (0 != len){
+					sub_sock.data_to_client[i].Type = type_upload_DataToClient;
+					retval = send(sub_sock.subSockArray[i], (char*)&sub_sock.data_to_client[i], sizeof(sub_sock.data_to_client[i]), 0);
+					retval = send(sub_sock.subSockArray[i], (char*)&file_abstract, sizeof(file_abstract), 0);
+					if (retval == -1){
+						retval = WSAGetLastError();
+						if (retval != WSAEWOULDBLOCK){
+							closesocket(sub_sock.subSockArray[i]);
+							sub_sock.current_state1[i] = 0;
+							sub_sock.subSockArray[i] = 0;
+							sub_sock.clientName[i] = _T("");
+							sub_sock.clientDlg[i] = _T("");
+							sub_sock.count -= 1;
+						}
+					}
+					else{
+						//更新TTRB
+						indexOfTTRB = findFreeTTRB(&ttrb_send);
+						ttrb_send.clientName[indexOfTTRB] = sub_sock.clientName[i];
+						ttrb_send.filepath[indexOfTTRB].Format(_T("./sendfile/%s"), file_abstract.filepath);
+						ttrb_send.filesize[indexOfTTRB] = file_abstract.filesize;
+						ttrb_send.count += 1;
+						
+						//判断对应文件传输子套接字是否有效
+						if ((-1 != searchTTRB(&ttrb_send, ttrb_send.clientName[indexOfTTRB])) || (-1 != searchTTRB(&ttrb_recv, ttrb_send.clientName[indexOfTTRB]))){
+							//有效
+							retval = sendFile(indexOfTTRB);
+						}
+
+
+					}
+
+				}
+				else{
+					MessageBox(CString("You haven`t chosen any file to upload!"), CString("client"), MB_OK);
+				}
+
+
+			
+// authentication_serverDlg.cpp : implementation file
+//
+
+#include "stdafx.h"
+#include "authentication_server.h"
+#include "authentication_serverDlg.h"
+#include "afxdialogex.h"
+
+#ifdef _DEBUG
+#define new DEBUG_NEW
+#endif
+
+#define UM_SOCK WM_USER + 100
+#define UM_SOCK_TRANS WM_USER + 101
+#define WM_POST_CurrentListMSG WM_USER + 2
+#define WM_POST_CurrentClientMSG WM_USER + 3
+// CAboutDlg dialog used for App About
+
+class CAboutDlg : public CDialogEx
+{
+public:
+	CAboutDlg();
+
+// Dialog Data
+	enum { IDD = IDD_ABOUTBOX };
+
+	protected:
+	virtual void DoDataExchange(CDataExchange* pDX);    // DDX/DDV support
+
+// Implementation
+protected:
+	DECLARE_MESSAGE_MAP()
+};
+
+CAboutDlg::CAboutDlg() : CDialogEx(CAboutDlg::IDD)
+{
+}
+
+void CAboutDlg::DoDataExchange(CDataExchange* pDX)
+{
+	CDialogEx::DoDataExchange(pDX);
+}
+
+BEGIN_MESSAGE_MAP(CAboutDlg, CDialogEx)
+END_MESSAGE_MAP()
+
+
+// Cauthentication_serverDlg dialog
+
+
+
+Cauthentication_serverDlg::Cauthentication_serverDlg(CWnd* pParent /*=NULL*/)
+: CDialogEx(Cauthentication_serverDlg::IDD, pParent)
+, LocalPort(8000)
+, password(12345)
+, SendMsgText(_T(""))
+, DisplayText(_T(""))
+, CurrentList(_T(""))
+{
+	//Initialize main_sock
+	main_sock.mainsock = 0;
+	main_sock.current_state0 = 0;//无服务
+	//Initialize tran_sock
+	tran_sock.transock = 0;
+	tran_sock.current_state = 0;//无服务
+	//Initialize sub_sock
+	char i;
+	sub_sock.count = 0;
+	for (i = 0; i < maxSubSockNum; i++){
+		sub_sock.current_state1[i] = 0;
+		sub_sock.subSockArray[i] = 0;
+		sub_sock.clientName[i] = _T("");
+		sub_sock.clientDlg[i] = _T("");
+	}
+
+	//Initialize ttrb_recv
+	initTTRB(&ttrb_recv);
+
+	//Initialize ttrb_send
+	initTTRB(&ttrb_send);
+
+	m_hIcon = AfxGetApp()->LoadIcon(IDR_MAINFRAME);
+}
+
+void Cauthentication_serverDlg::DoDataExchange(CDataExchange* pDX)
+{
+	CDialogEx::DoDataExchange(pDX);
+	DDX_Text(pDX, IDC_EDIT_SETPORT, LocalPort);
+	DDX_Text(pDX, IDC_EDIT_SETPASSWORD, password);
+	DDX_Text(pDX, IDC_EDIT_SENDMSG, SendMsgText);
+	DDX_Text(pDX, IDC_EDIT_DLGDISPLAY, DisplayText);
+	DDX_Text(pDX, IDC_EDIT_CLIENTLIST, CurrentList);
+	DDX_Control(pDX, IDC_COMBO1, CurrentClient);
+}
+
+BEGIN_MESSAGE_MAP(Cauthentication_serverDlg, CDialogEx)
+	ON_WM_SYSCOMMAND()
+	ON_WM_PAINT()
+	ON_WM_QUERYDRAGICON()
+	ON_BN_CLICKED(IDC_BUTTON_STARTSERVER, &Cauthentication_serverDlg::OnBnClickedButtonStartserver)
+	ON_BN_CLICKED(IDC_BUTTON_STOPSERVER, &Cauthentication_serverDlg::OnBnClickedButtonStopserver)
+	ON_CBN_SELCHANGE(IDC_COMBO1, &Cauthentication_serverDlg::OnCbnSelchangeCombo1)
+	ON_BN_CLICKED(IDC_BUTTON_SENDMSG, &Cauthentication_serverDlg::OnBnClickedButtonSendmsg)
+	ON_MESSAGE(WM_POST_CurrentListMSG, &Cauthentication_serverDlg::UpdateCurrentList)
+	ON_MESSAGE(WM_POST_CurrentClientMSG, &Cauthentication_serverDlg::UpdateCurrentClient)
+	ON_CBN_DBLCLK(IDC_COMBO1, &Cauthentication_serverDlg::OnCbnDblclkCurrentClient)
+	ON_CBN_EDITCHANGE(IDC_COMBO1, &Cauthentication_serverDlg::OnCbnEditchangeCurrentClient)
+	ON_CBN_DROPDOWN(IDC_COMBO1, &Cauthentication_serverDlg::OnCbnDropdownCurrentClient)
+	ON_BN_CLICKED(IDC_BUTTON_UPLOADFILE, &Cauthentication_serverDlg::OnBnClickedButtonUploadfile)
+	ON_BN_CLICKED(IDC_BUTTON_DOWNLOADFILE, &Cauthentication_serverDlg::OnBnClickedButtonDownloadfile)
+END_MESSAGE_MAP()
+
+
+// Cauthentication_serverDlg message handlers
+
+BOOL Cauthentication_serverDlg::OnInitDialog()
+{
+	CDialogEx::OnInitDialog();
+
+	// Add "About..." menu item to system menu.
+
+	// IDM_ABOUTBOX must be in the system command range.
+	ASSERT((IDM_ABOUTBOX & 0xFFF0) == IDM_ABOUTBOX);
+	ASSERT(IDM_ABOUTBOX < 0xF000);
+
+	CMenu* pSysMenu = GetSystemMenu(FALSE);
+	if (pSysMenu != NULL)
+	{
+		BOOL bNameValid;
+		CString strAboutMenu;
+		bNameValid = strAboutMenu.LoadString(IDS_ABOUTBOX);
+		ASSERT(bNameValid);
+		if (!strAboutMenu.IsEmpty())
+		{
+			pSysMenu->AppendMenu(MF_SEPARATOR);
+			pSysMenu->AppendMenu(MF_STRING, IDM_ABOUTBOX, strAboutMenu);
+		}
+	}
+
+	// Set the icon for this dialog.  The framework does this automatically
+	//  when the application's main window is not a dialog
+	SetIcon(m_hIcon, TRUE);			// Set big icon
+	SetIcon(m_hIcon, FALSE);		// Set small icon
+
+	// TODO: Add extra initialization here
+
+	return TRUE;  // return TRUE  unless you set the focus to a control
+}
+
+void Cauthentication_serverDlg::OnSysCommand(UINT nID, LPARAM lParam)
+{
+	if ((nID & 0xFFF0) == IDM_ABOUTBOX)
+	{
+		CAboutDlg dlgAbout;
+		dlgAbout.DoModal();
+	}
+	else
+	{
+		CDialogEx::OnSysCommand(nID, lParam);
+	}
+}
+
+// If you add a minimize button to your dialog, you will need the code below
+//  to draw the icon.  For MFC applications using the document/view model,
+//  this is automatically done for you by the framework.
+
+void Cauthentication_serverDlg::OnPaint()
+{
+	if (IsIconic())
+	{
+		CPaintDC dc(this); // device context for painting
+
+		SendMessage(WM_ICONERASEBKGND, reinterpret_cast<WPARAM>(dc.GetSafeHdc()), 0);
+
+		// Center icon in client rectangle
+		int cxIcon = GetSystemMetrics(SM_CXICON);
+		int cyIcon = GetSystemMetrics(SM_CYICON);
+		CRect rect;
+		GetClientRect(&rect);
+		int x = (rect.Width() - cxIcon + 1) / 2;
+		int y = (rect.Height() - cyIcon + 1) / 2;
+
+		// Draw the icon
+		dc.DrawIcon(x, y, m_hIcon);
+	}
+	else
+	{
+		CDialogEx::OnPaint();
+	}
+}
+
+// The system calls this function to obtain the cursor to display while the user drags
+//  the minimized window.
+HCURSOR Cauthentication_serverDlg::OnQueryDragIcon()
+{
+	return static_cast<HCURSOR>(m_hIcon);
+}
+
+
+
+
+void Cauthentication_serverDlg::OnBnClickedButtonStartserver()
+{
+	if (main_sock.current_state0 == 0){
+		int retval;
+		sockaddr_in server;
+		WSAData wsa;
+		UpdateData(TRUE);
+		WSAStartup(0x101, &wsa);
+
+		if (LocalPort > 65535){//检查端口号范围
+			MessageBox(CString("port number error!"), CString("server"), MB_OK);
+			return;
+		}
+
+		main_sock.mainsock = socket(AF_INET, SOCK_STREAM, 0);
+
+		server.sin_family = AF_INET;
+		//server.sin_addr.S_un.S_addr = htonl(INADDR_ANY);//绑定所有IP地址
+			server.sin_addr.S_un.S_un_b.s_b1 = 127;
+			server.sin_addr.S_un.S_un_b.s_b2 = 0;
+			server.sin_addr.S_un.S_un_b.s_b3 = 0;
+			server.sin_addr.S_un.S_un_b.s_b4 = 1;
+			
+		server.sin_port = htons(LocalPort);
+
+		retval = bind(main_sock.mainsock, (sockaddr *)&server, sizeof(server));
+		if (retval == -1)
+		{	
+			retval = WSAGetLastError();
+			MessageBox("bind error!", CString("server"), MB_OK);
+			return;
+		}
+		else{
+			retval = listen(main_sock.mainsock, 5);
+			retval = WSAAsyncSelect(main_sock.mainsock, m_hWnd, UM_SOCK, FD_ACCEPT);
+			main_sock.current_state0 = 1;//服务已开启
+			retval = startTranServer();//开启文件传输端口
+			if (retval == -1){
+
+			}
+			else{
+			}
+			
+			MessageBox(CString("start server success!"), CString("server"), MB_OK);
+
+		}
+	}
+	else{
+		MessageBox(CString("server has been started!"), CString("server"), MB_OK);
+	}
+}
+
+
+void Cauthentication_serverDlg::OnBnClickedButtonStopserver()
+{
+	if (main_sock.current_state0 != 0){
+		closesocket(main_sock.mainsock);
+		main_sock.mainsock = 0;
+		main_sock.current_state0 = 0;//服务关闭
+		WSACleanup();
+		sub_sock.count = 0;//flush subSock
+		char i;
+		for (i = 0; i < maxSubSockNum; i++){
+			sub_sock.current_state1[i] = 0;
+			sub_sock.subSockArray[i] = 0;
+			sub_sock.clientName[i] = _T("");
+			sub_sock.clientDlg[i] = _T("");
+		}
+		DisplayText = _T("");
+		UpdateData(FALSE);
+		PostMessage(WM_POST_CurrentListMSG, 0, (LPARAM)(&sub_sock));
+		CurrentClientMsgFlag = 2;
+		SendMessage(WM_POST_CurrentClientMSG, (WPARAM)(&CurrentClientMsgFlag), 0);
+		//server_start.EnableWindow(FALSE);
+	}
+	else{
+		MessageBox(CString("server hasn`t been started!"), CString("server"), MB_OK);
+	}
+}
+
+
+void Cauthentication_serverDlg::OnCbnSelchangeCombo1()
+{
+	// TODO: Add your control notification handler code here
+}
+
+
+void Cauthentication_serverDlg::OnBnClickedButtonSendmsg()
+{
+	if (main_sock.current_state0 == 1){
+		if (sub_sock.count > 0){
+			int len, retval, i, nIndex;
+			UpdateData(TRUE);
+			SOCKET tempS = 0;
+			CString tempName;
+			CString tempBuf;
+			nIndex = CurrentClient.GetCurSel();//current sel
+			CurrentClient.GetLBText(nIndex, tempName);
+			for (i = 0; i < maxSubSockNum; i++){
+				if (tempName == (sub_sock.clientName[i] + CString("\r\n"))){
+					tempS = sub_sock.subSockArray[i];
+					break;
+				}
+			}
+
+			if (2 == sub_sock.current_state1[i]){//判断是否处于工作状态
+				len = SendMsgText.GetLength();
+				if (0 != len){
+					sub_sock.data_to_client[i].Type = type_chat_DataToClient;
+					sub_sock.data_to_client[i].content = SendMsgText;
+					retval = send(tempS, (char*)&(sub_sock.data_to_client[i]), sizeof(sub_sock.data_to_client[i]), 0);
+					retval = send(tempS, (char*)SendMsgText.GetBuffer(0), len, 0);
+					SendMsgText.ReleaseBuffer();
+					if (retval == -1){
+						retval = WSAGetLastError();
+						if (retval != WSAEWOULDBLOCK){
+							closesocket(tempS);
+							sub_sock.current_state1[i] = 0;
+							sub_sock.subSockArray[i] = 0;
+							sub_sock.clientName[i] = _T("");
+							sub_sock.clientDlg[i] = _T("");
+							sub_sock.count -= 1;
+							DisplayText = _T("");
+							UpdateData(FALSE);
+							MessageBox(CString("failed to send! close connection!"), CString("server"), MB_OK);
+						}
+					}
+					else{
+						tempBuf.Format(_T("%s"), CString("我： "));
+						sub_sock.clientDlg[i] += (tempBuf + SendMsgText + CString("\r\n"));
+						DisplayText = sub_sock.clientDlg[i];
+						SendMsgText = _T("");
+						UpdateData(FALSE);
+					}
+				}
+				else{
+					MessageBox(CString("There is no content to send!"), CString("server"), MB_OK);
+				}
+			}
+			else{
+				MessageBox(CString("can't send messages to this invalid client!"), CString("server"), MB_OK);
+			}
+		}
+		else{
+			MessageBox(CString("client list is empty!"), CString("server"), MB_OK);
+		}
+	}
+	else{
+		MessageBox(CString("server hasn`t been started!"), CString("server"), MB_OK);
+	}
+}
+
+LRESULT	Cauthentication_serverDlg::WindowProc(UINT message, WPARAM wParam, LPARAM lParam){
+	SOCKET s, temps;
+	int Event;
+	sockaddr_in remote;
+	int retval;
+	USHORT lineNum, countPerLine = 25;
+	const UINT bufSize = 4096;
+	char buf[bufSize], i;
+	int len;
+	int indexOfTTRB;
+	CString tempName, tempBuf("");
+	CString queryData(""), queryReply("");
+	switch (message){
+	case UM_SOCK:
+		s = (SOCKET)LOWORD(wParam);
+		Event = LOWORD(lParam);
+		switch (Event){
+		case FD_ACCEPT:
+			len = sizeof(remote);
+			temps = accept(s, (sockaddr*)&remote, &len);
+			if (temps == SOCKET_ERROR){
+				closesocket(s);
+				main_sock.current_state0 = 0;
+				main_sock.mainsock = 0;
+				WSACleanup();
+				DisplayText = _T("");
+				UpdateData(FALSE);
+				MessageBox(CString("accept a connection error! please start server again!"), CString("server"), MB_OK);
+				sub_sock.count = 0;
+				char i;
+				for (i = 0; i < maxSubSockNum; i++){
+					sub_sock.current_state1[i] = 0;
+					sub_sock.subSockArray[i] = 0;
+					sub_sock.clientName[i] = _T("");
+					sub_sock.clientDlg[i] = _T("");
+				}
+				PostMessage(WM_POST_CurrentListMSG, 0, (LPARAM)(&sub_sock));
+				CurrentClientMsgFlag = 2;
+				SendMessage(WM_POST_CurrentClientMSG, (WPARAM)(&CurrentClientMsgFlag), 0);
+				break;
+			}
+			else{
+				for (i = 0; i < maxSubSockNum; i++){
+					if (sub_sock.subSockArray[i] == 0){
+						break;
+					}
+				}
+				
+				//发送质询数据
+				//queryData = CString("test to query");
+				//len = queryData.GetLength();
+				//retval = send(temps, (char*)queryData.GetBuffer(0), len, 0);
+				//queryData.ReleaseBuffer();
+				
+				//填写data_to_client（添加质询数据）
+				sub_sock.data_to_client[i].Type = type_query;
+				sub_sock.data_to_client[i].count_2byte = 10;
+				sub_sock.data_to_client[i].count_4byte = 20;
+				sub_sock.data_to_client[i].data_2byte = new USHORT[(const USHORT)sub_sock.data_to_client[i].count_2byte];
+				sub_sock.data_to_client[i].data_4byte = new UINT[(const USHORT)sub_sock.data_to_client[i].count_4byte];
+				//模拟质询数据
+				int k;
+				for (k = 0; k < sub_sock.data_to_client[i].count_2byte; k++){
+					sub_sock.data_to_client[i].data_2byte[k] = (USHORT)k;
+				}
+				for (k = 0; k < sub_sock.data_to_client[i].count_4byte; k++){
+					sub_sock.data_to_client[i].data_4byte[k] = (UINT)k;
+				}
+					
+				sub_sock.data_to_client[i].content = _T("");
+				//send to client(分三次发送)
+				retval = send(temps, (char*)&(sub_sock.data_to_client[i]), sizeof(sub_sock.data_to_client[i]), 0);
+				retval = send(temps, (char*)sub_sock.data_to_client[i].data_2byte, sizeof(USHORT) * sub_sock.data_to_client[i].count_2byte, 0);
+				retval = send(temps, (char*)sub_sock.data_to_client[i].data_4byte, sizeof(UINT) * sub_sock.data_to_client[i].count_4byte, 0);
+				delete sub_sock.data_to_client[i].data_2byte;
+				delete sub_sock.data_to_client[i].data_4byte;
+				if (retval == -1){
+					retval = WSAGetLastError();
+					if (retval != WSAEWOULDBLOCK){//超时处理待补充
+						closesocket(temps);
+						WSACleanup();
+						//更新子套接字管理结构体（回收资源）
+						sub_sock.current_state1[i] = 0;
+						sub_sock.subSockArray[i] = 0;
+						sub_sock.clientName[i] = _T("");
+						sub_sock.clientDlg[i] = _T("");
+						sub_sock.count -= 1;
+						MessageBox(CString("failed to send query datas! close connection!"), CString("server"), MB_OK);
+						break;
+					}
+				}//默认数据发送成功
+				sub_sock.count += 1;
+				sub_sock.current_state1[i] = 1;//进入下一状态，等待接收验证回复信息
+				sub_sock.subSockArray[i] = temps;
+				tempName.Format("%d", (int)temps);
+				MessageBox(CString("accept a connection"), CString("server"), MB_OK);
+				WSAAsyncSelect(temps, m_hWnd, UM_SOCK, FD_READ | FD_CLOSE);
+			}
+			break;
+		case FD_READ:
+			for (i = 0; i < maxSubSockNum; i++){
+				if (sub_sock.subSockArray[i] == s){
+					break;
+				}
+			}
+			len = recv(s, (char*)&data_from_client, sizeof(data_from_client), 0);
+			if (len <= 0){
+				retval = WSAGetLastError();
+				if (retval != WSAEWOULDBLOCK){
+					closesocket(s);//关闭子套接字
+					//更新子套接字管理结构体（回收资源）
+					sub_sock.current_state1[i] = 0;
+					sub_sock.subSockArray[i] = 0;
+					sub_sock.clientName[i] = _T("");
+					sub_sock.clientDlg[i] = _T("");
+					sub_sock.count -= 1;	
+					MessageBox(CString("failed to recv! close connection"), CString("server"), MB_OK);
+					break;
+				}
+				else
+					break;
+			}
+			else{
+				if (2 == sub_sock.current_state1[i]){
+					if (type_chat_DataFromClient == data_from_client.Type){
+						len = recv(s, (char *)buf, bufSize, 0);
+						if (len <= 0){
+							retval = WSAGetLastError();
+							if (retval != WSAEWOULDBLOCK){
+								closesocket(s);//关闭子套接字
+								//更新子套接字管理结构体（回收资源）
+								sub_sock.current_state1[i] = 0;
+								sub_sock.subSockArray[i] = 0;
+								sub_sock.clientName[i] = _T("");
+								sub_sock.clientDlg[i] = _T("");
+								sub_sock.count -= 1;
+								MessageBox(CString("failed to recv! close connection"), CString("server"), MB_OK);
+								break;
+							}
+							else
+								break;
+						}
+						else{
+							//更新聊天对话框内容
+							buf[len] = 0;
+							tempBuf.Format(_T("%s"), buf);
+							tempBuf = sub_sock.clientName[i] + CString("： ") + tempBuf;
+							sub_sock.clientDlg[i] += (tempBuf + CString("\r\n"));
+							DisplayText = sub_sock.clientDlg[i];
+							//将CurrentClient更新为此client
+							
+							int nIndex = CurrentClient.FindStringExact(0, sub_sock.clientName[i] + CString("\r\n"));
+							if (nIndex != -1){
+								CurrentClient.SetCurSel(nIndex);
+							}
+							//arrange the text to make it well organized
+							/*					len = sub_sock.clientDlg[i].GetLength();
+												if (len % countPerLine == 0){
+												lineNum = len / countPerLine;
+												}
+												else lineNum = len / countPerLine + 1;
+												for (i = 0; i < lineNum - 1; i++){
+												DisplayText += (tempBuf.Mid(i*countPerLine, countPerLine) + CString("\r\n"));
+												}
+												DisplayText += tempBuf.Right(len - (lineNum - 1)*countPerLine) + CString("\r\n\r\n");
+												*/
+							UpdateData(FALSE);
+						}
+					}
+					else if (type_upload_DataFromClient == data_from_client.Type){
+						len = recv(s, (char *)&file_abstract, sizeof(file_abstract), 0);
+						if (len <= 0){
+							retval = WSAGetLastError();
+							if (retval != WSAEWOULDBLOCK){
+								closesocket(s);//关闭子套接字
+								//更新子套接字管理结构体（回收资源）
+								sub_sock.current_state1[i] = 0;
+								sub_sock.subSockArray[i] = 0;
+								sub_sock.clientName[i] = _T("");
+								sub_sock.clientDlg[i] = _T("");
+								sub_sock.count -= 1;
+								MessageBox(CString("failed to recv a file! close connection"), CString("server"), MB_OK);
+								break;
+							}
+							else
+								break;
+						}
+						else{
+							
+							//更新ttrb_recv
+							indexOfTTRB = findFreeTTRB(&ttrb_recv);
+							ttrb_recv.clientName[indexOfTTRB] = sub_sock.clientName[i];
+							ttrb_recv.filepath[indexOfTTRB].Format(_T("./recvfile/%s"), file_abstract.filepath);
+							ttrb_recv.filesize[indexOfTTRB] = file_abstract.filesize;
+							ttrb_recv.count += 1;
+
+							//将CurrentClient更新为此client
+							int nIndex = CurrentClient.FindStringExact(0, sub_sock.clientName[i] + CString("\r\n"));
+							if (nIndex != -1){
+								CurrentClient.SetCurSel(nIndex);
+							}
+						}
+					}
+					
+				}
+				else if(1 == sub_sock.current_state1[i]){
+					if (type_result == data_from_client.Type){
+						//处理客户机验证回复信息
+						if (2048 == data_from_client.queryResult){//通过验证（暂时模拟验证计算结果，待完善！！）
+							//更新对应客户状态
+							sub_sock.current_state1[i] = 2;//进入工作状态
+							int k;
+							for (k = 0; k < maxSubSockNum; k++){
+								if (sub_sock.subSockArray[k] != 0){
+									if (sub_sock.clientName[k] == data_from_client.clientName){
+										//To do 
+										//提示客户机重名登录
+										return 0;
+										break;
+									}
+								}
+							}
+							sub_sock.clientName[i] = data_from_client.clientName;//更新为正式用户名
+							
+							//发送验证结果
+							sub_sock.data_to_client[i].Type = type_reply;
+							sub_sock.data_to_client[i].content = valid;
+							//分两次发送
+							retval = send(s, (char*)&(sub_sock.data_to_client[i]), sizeof(sub_sock.data_to_client[i]), 0);
+							retval = send(s, (char*)sub_sock.data_to_client[i].content.GetBuffer(0), sub_sock.data_to_client[i].content.GetLength(), 0);
+							sub_sock.data_to_client[i].content.ReleaseBuffer();
+							if (retval == -1){
+								retval = WSAGetLastError();
+								if (retval != WSAEWOULDBLOCK){
+									closesocket(s);
+									//更新子套接字管理结构体（回收资源）
+									sub_sock.current_state1[i] = 0;
+									sub_sock.subSockArray[i] = 0;
+									sub_sock.clientName[i] = _T("");
+									sub_sock.clientDlg[i] = _T("");
+									sub_sock.count -= 1;
+									WSACleanup();
+									break;
+								}
+							}
+							//更新currentlist currentclient
+							PostMessage(WM_POST_CurrentListMSG, 0, (LPARAM)(&sub_sock));
+							CurrentClientMsgFlag = 0;
+							tempName = sub_sock.clientName[i];
+							SendMessage(WM_POST_CurrentClientMSG, (WPARAM)(&CurrentClientMsgFlag), (LPARAM)(&tempName));
+							MessageBox(CString("accept a valid connection!"), CString("server"), MB_OK);
+						}
+						else{//未通过验证
+							closesocket(s);
+							//更新子套接字管理结构体（回收资源）
+							sub_sock.current_state1[i] = 0;
+							sub_sock.subSockArray[i] = 0;
+							sub_sock.clientName[i] = _T("");
+							sub_sock.clientDlg[i] = _T("");
+							sub_sock.count -= 1;
+							WSACleanup();
+							break;
+
+						}
+					}
+					else{
+						//To do
+					}
+				}
+				else{
+					//To do
+				}
+
+			}
+			break;
+		case FD_CLOSE:
+			closesocket(s);//close the sub-sock
+			for (i = 0; i < maxSubSockNum; i++){
+				if (sub_sock.subSockArray[i] == s){
+					sub_sock.subSockArray[i] = 0;
+					sub_sock.clientName[i] = _T("");
+					sub_sock.count -= 1;
+					break;
+				}
+			}
+			PostMessage(WM_POST_CurrentListMSG, 0, (LPARAM)(&sub_sock));
+			tempName.Format("%d", (int)s);
+			CurrentClientMsgFlag = 1;
+			SendMessage(WM_POST_CurrentClientMSG, (WPARAM)(&CurrentClientMsgFlag), (LPARAM)(&tempName));
+			break;
+		}
+		break;
+	case UM_SOCK_TRANS:
+		s = (SOCKET)LOWORD(wParam);
+		Event = LOWORD(lParam);
+		switch (Event){
+		case FD_ACCEPT:
+			len = sizeof(remote);
+			temps = accept(s, (sockaddr*)&remote, &len);
+			if (temps == SOCKET_ERROR){
+				closesocket(s);
+				tran_sock.transock = 0;
+				tran_sock.current_state = 0;
+				MessageBox(CString("fail to accept a file connection!"), CString("server"), MB_OK);
+			}
+			else{
+					MessageBox(CString("accept a file connection!"), CString("server"), MB_OK);
+					WSAAsyncSelect(temps, m_hWnd, UM_SOCK_TRANS, FD_READ | FD_CLOSE);
+
+							
+			}
+
+			break;
+		case FD_READ:
+			indexOfTTRB = searchTTRB(&ttrb_recv, s);
+			if (indexOfTTRB == -1){//在ttrb_recv中匹配传输子套接字信息，文件传输初始阶段无该信息，依次作为判断依据
+				len = recv(s, (char *)&file_trans_head, sizeof(file_trans_head), 0);
+				if (len <= 0){
+					//MessageBox(CString("failed to recv file!"), CString("server"), MB_OK);
+					return 0;
+				}
+				else{
+					if(file_trans_head.transType == transType_download){
+						indexOfTTRB = searchTTRB(&ttrb_send, file_trans_head.clientName);
+						ttrb_send.transock[indexOfTTRB] = s;
+						retval = sendFile(indexOfTTRB);
+
+						return 0;
+					}
+					else if(file_trans_head.transType == transType_upload){
+						tempBuf.Format(_T("%s"), file_trans_head.clientName);
+						indexOfTTRB = searchTTRB(&ttrb_recv, tempBuf);
+						ttrb_recv.transock[indexOfTTRB] = s;
+						MessageBox(CString("want to recv a file?") + ttrb_recv.filepath[indexOfTTRB], CString("server"), MB_OK);
+					}
+					else {
+						return 0;
+					}
+				}
+			}
+
+
+			len = recv(s, buf, bufSize, 0);
+			if (len <= 0){
+				retval = WSAGetLastError();
+				if (retval != WSAEWOULDBLOCK){
+					closesocket(s);//关闭子套接字
+					deleteTTRB(&ttrb_recv, indexOfTTRB);//销毁指定ttrb_recv元素
+					//MessageBox(CString("failed to recv file!"), CString("server"), MB_OK);
+					break;
+				}
+				else
+					break;
+			}
+			else{
+				if (len < bufSize){
+					buf[len] = '\0';
+				}
+				DWORD dwWrite;
+				bool bRet;
+				//保存文件
+				HANDLE hFile = CreateFile(ttrb_recv.filepath[indexOfTTRB], GENERIC_WRITE, FILE_SHARE_WRITE, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+				if (hFile == INVALID_HANDLE_VALUE) return 0;
+				SetFilePointer(hFile, 0, NULL, FILE_END);
+				bRet = WriteFile(hFile, buf, len, &dwWrite, NULL);
+				if (bRet == FALSE){
+					MessageBox(CString("write file error!"), CString("server"), MB_OK);
+
+				}
+				else{
+
+				}
+				CloseHandle(hFile);
+				
+				ttrb_recv.filesize[indexOfTTRB] -= len;//更新待接收文件大小
+				if (ttrb_recv.filesize[indexOfTTRB] <= 0){//文件接收完整
+					if (searchTTRB(&ttrb_send, s) == -1){//如果该子套接字不在ttrb_send队列，即未正在发送文件
+						closesocket(s);//关闭子套接字
+					}
+					deleteTTRB(&ttrb_recv, indexOfTTRB);//销毁指定ttrb_recv元素
+					
+					MessageBox(CString("write file success!"), CString("server"), MB_OK);
+
+					//通知对方成功接收文件
+					//To do？？？？？？？？？？？？？？？？
+				}
+
+			}
+
+			break;
+		case FD_CLOSE:
+			//销毁对应文件传输子套接字上的TTRB
+			indexOfTTRB = searchTTRB(&ttrb_recv, s);
+			if (indexOfTTRB != -1){
+				deleteTTRB(&ttrb_recv, indexOfTTRB);
+			}
+			indexOfTTRB = searchTTRB(&ttrb_send, s);
+			if (indexOfTTRB != -1){
+				deleteTTRB(&ttrb_send, indexOfTTRB);
+			}
+			break;
+		}
+		break;
+	}
+	return CDialogEx::WindowProc(message, wParam, lParam);//为什么这里需要调用？？
+}
+
+LRESULT Cauthentication_serverDlg::UpdateCurrentList(WPARAM wParam, LPARAM lParam)
+{
+	struct subSock * tempSock = (struct subSock *)lParam;
+	CurrentList = _T("");
+	char i, j = 0;
+	for (i = 0; i < maxSubSockNum; i++){
+		if (tempSock->subSockArray[i] != 0){
+			CurrentList += (tempSock->clientName[i] + CString("\r\n"));
+			j++;
+		}
+		if (j == tempSock->count) break;
+	}
+	UpdateData(FALSE);
+	return 0;
+}
+
+LRESULT Cauthentication_serverDlg::UpdateCurrentClient(WPARAM wParam, LPARAM lParam)
+{
+	char tempFlag = *(char *)wParam;
+	int nIndex, nIndex1;
+	CString tempName;
+	if (0 == tempFlag){//add
+		tempName = *(CString *)lParam;
+		CurrentClient.AddString(tempName + CString("\r\n"));
+		nIndex = CurrentClient.FindStringExact(0, tempName + CString("\r\n"));
+		if (nIndex == CB_ERR) return 0;
+		CurrentClient.SetCurSel(nIndex);
+	}
+	else if (1 == tempFlag){//delete
+		tempName = *(CString *)lParam;
+		nIndex = CurrentClient.FindStringExact(0, tempName + CString("\r\n"));
+		if (nIndex != -1){
+			CurrentClient.DeleteString((UINT)nIndex);
+			nIndex1 = CurrentClient.GetCurSel();//current sel
+			if ((CurrentClient.GetCount() == 0)||(nIndex1 == -1)){
+				CurrentClient.SetCurSel(0);
+			}
+		}
+	}
+	else if (2 == tempFlag){
+		if (0 != CurrentClient.GetCount()){
+			CurrentClient.ResetContent();
+		}
+	}
+	else
+	{
+		//Todo
+	}
+	UpdateData(FALSE);
+	return 0;
+}
+
+
+void Cauthentication_serverDlg::OnCbnDblclkCurrentClient()
+{
+	if (CurrentClient.GetCount() != 0){
+		CurrentClient.ShowDropDown(TRUE);
+	}
+}
+
+
+void Cauthentication_serverDlg::OnCbnEditchangeCurrentClient()
+{
+	// TODO: Add your control notification handler code here
+}
+
+
+void Cauthentication_serverDlg::OnCbnDropdownCurrentClient()
+{
+	// TODO: Add your control notification handler code here
+	if (CurrentClient.GetCount() != 0){
+		//CurrentClient.ShowDropDown(TRUE);
+	}
+}
+
+
+void Cauthentication_serverDlg::OnBnClickedButtonUploadfile()
+{
+	int indexOfTTRB;
+	if (main_sock.current_state0 == 1){
+		if (sub_sock.count > 0){
+			int len, retval, i, nIndex;
+			UpdateData(TRUE);
+			SOCKET tempS = 0;
+			CString tempName;
+			CString tempBuf;
+			nIndex = CurrentClient.GetCurSel();//current sel
+			CurrentClient.GetLBText(nIndex, tempName);
+			for (i = 0; i < maxSubSockNum; i++){
+				if (tempName == (sub_sock.clientName[i] + CString("\r\n"))){
+					tempS = sub_sock.subSockArray[i];
+					break;
+				}
+			}
+
+			if (2 == sub_sock.current_state1[i]){//判断是否处于工作状态
+				CString filepath = "./sendfile/client.txt";//待完善，需改成灵活的文件路径名
+				LONG32 fileSize;
+				HANDLE hFile = CreateFile(filepath, GENERIC_READ, 0, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+				if (hFile == INVALID_HANDLE_VALUE){
+					MessageBox(CString("read file error! fail to upload!"), CString("server"), MB_OK);
+					return;
+				}
+				fileSize = GetFileSize(hFile, NULL);
+
+				file_abstract.filepath[0] = 'c';
+				file_abstract.filepath[1] = 'l';
+				file_abstract.filepath[2] = 'i';
+				file_abstract.filepath[3] = 'e';
+				file_abstract.filepath[4] = 'n';
+				file_abstract.filepath[5] = 't';
+				file_abstract.filepath[6] = '.';
+				file_abstract.filepath[7] = 't';
+				file_abstract.filepath[8] = 'x';
+				file_abstract.filepath[9] = 't';
+				file_abstract.filepath[10] = '\0';
+				file_abstract.filesize = fileSize;
+				len = 11;
+				if (0 != len){
+					sub_sock.data_to_client[i].Type = type_upload_DataToClient;
+					retval = send(sub_sock.subSockArray[i], (char*)&sub_sock.data_to_client[i], sizeof(sub_sock.data_to_client[i]), 0);
+					retval = send(sub_sock.subSockArray[i], (char*)&file_abstract, sizeof(file_abstract), 0);
+					if (retval == -1){
+						retval = WSAGetLastError();
+						if (retval != WSAEWOULDBLOCK){
+							closesocket(sub_sock.subSockArray[i]);
+							sub_sock.current_state1[i] = 0;
+							sub_sock.subSockArray[i] = 0;
+							sub_sock.clientName[i] = _T("");
+							sub_sock.clientDlg[i] = _T("");
+							sub_sock.count -= 1;
+						}
+					}
+					else{
+						//更新TTRB
+						indexOfTTRB = findFreeTTRB(&ttrb_send);
+						ttrb_send.clientName[indexOfTTRB] = sub_sock.clientName[i];
+						ttrb_send.filepath[indexOfTTRB].Format(_T("./sendfile/%s"), file_abstract.filepath);
+						ttrb_send.filesize[indexOfTTRB] = file_abstract.filesize;
+						ttrb_send.count += 1;
+						
+						//判断对应文件传输子套接字是否有效
+						if ((-1 != searchTTRB(&ttrb_send, ttrb_send.clientName[indexOfTTRB])) || (-1 != searchTTRB(&ttrb_recv, ttrb_send.clientName[indexOfTTRB]))){
+							//有效
+							retval = sendFile(indexOfTTRB);
+						}
+
+
+					}
+
+				}
+				else{
+					MessageBox(CString("You haven`t chosen any file to upload!"), CString("client"), MB_OK);
+				}
+
+
+			
+// authentication_serverDlg.cpp : implementation file
+//
+
+#include "stdafx.h"
+#include "authentication_server.h"
+#include "authentication_serverDlg.h"
+#include "afxdialogex.h"
+
+#ifdef _DEBUG
+#define new DEBUG_NEW
+#endif
+
+#define UM_SOCK WM_USER + 100
+#define UM_SOCK_TRANS WM_USER + 101
+#define WM_POST_CurrentListMSG WM_USER + 2
+#define WM_POST_CurrentClientMSG WM_USER + 3
+// CAboutDlg dialog used for App About
+
+class CAboutDlg : public CDialogEx
+{
+public:
+	CAboutDlg();
+
+// Dialog Data
+	enum { IDD = IDD_ABOUTBOX };
+
+	protected:
+	virtual void DoDataExchange(CDataExchange* pDX);    // DDX/DDV support
+
+// Implementation
+protected:
+	DECLARE_MESSAGE_MAP()
+};
+
+CAboutDlg::CAboutDlg() : CDialogEx(CAboutDlg::IDD)
+{
+}
+
+void CAboutDlg::DoDataExchange(CDataExchange* pDX)
+{
+	CDialogEx::DoDataExchange(pDX);
+}
+
+BEGIN_MESSAGE_MAP(CAboutDlg, CDialogEx)
+END_MESSAGE_MAP()
+
+
+// Cauthentication_serverDlg dialog
+
+
+
+Cauthentication_serverDlg::Cauthentication_serverDlg(CWnd* pParent /*=NULL*/)
+: CDialogEx(Cauthentication_serverDlg::IDD, pParent)
+, LocalPort(8000)
+, password(12345)
+, SendMsgText(_T(""))
+, DisplayText(_T(""))
+, CurrentList(_T(""))
+{
+	//Initialize main_sock
+	main_sock.mainsock = 0;
+	main_sock.current_state0 = 0;//无服务
+	//Initialize tran_sock
+	tran_sock.transock = 0;
+	tran_sock.current_state = 0;//无服务
+	//Initialize sub_sock
+	char i;
+	sub_sock.count = 0;
+	for (i = 0; i < maxSubSockNum; i++){
+		sub_sock.current_state1[i] = 0;
+		sub_sock.subSockArray[i] = 0;
+		sub_sock.clientName[i] = _T("");
+		sub_sock.clientDlg[i] = _T("");
+	}
+
+	//Initialize ttrb_recv
+	initTTRB(&ttrb_recv);
+
+	//Initialize ttrb_send
+	initTTRB(&ttrb_send);
+
+	m_hIcon = AfxGetApp()->LoadIcon(IDR_MAINFRAME);
+}
+
+void Cauthentication_serverDlg::DoDataExchange(CDataExchange* pDX)
+{
+	CDialogEx::DoDataExchange(pDX);
+	DDX_Text(pDX, IDC_EDIT_SETPORT, LocalPort);
+	DDX_Text(pDX, IDC_EDIT_SETPASSWORD, password);
+	DDX_Text(pDX, IDC_EDIT_SENDMSG, SendMsgText);
+	DDX_Text(pDX, IDC_EDIT_DLGDISPLAY, DisplayText);
+	DDX_Text(pDX, IDC_EDIT_CLIENTLIST, CurrentList);
+	DDX_Control(pDX, IDC_COMBO1, CurrentClient);
+}
+
+BEGIN_MESSAGE_MAP(Cauthentication_serverDlg, CDialogEx)
+	ON_WM_SYSCOMMAND()
+	ON_WM_PAINT()
+	ON_WM_QUERYDRAGICON()
+	ON_BN_CLICKED(IDC_BUTTON_STARTSERVER, &Cauthentication_serverDlg::OnBnClickedButtonStartserver)
+	ON_BN_CLICKED(IDC_BUTTON_STOPSERVER, &Cauthentication_serverDlg::OnBnClickedButtonStopserver)
+	ON_CBN_SELCHANGE(IDC_COMBO1, &Cauthentication_serverDlg::OnCbnSelchangeCombo1)
+	ON_BN_CLICKED(IDC_BUTTON_SENDMSG, &Cauthentication_serverDlg::OnBnClickedButtonSendmsg)
+	ON_MESSAGE(WM_POST_CurrentListMSG, &Cauthentication_serverDlg::UpdateCurrentList)
+	ON_MESSAGE(WM_POST_CurrentClientMSG, &Cauthentication_serverDlg::UpdateCurrentClient)
+	ON_CBN_DBLCLK(IDC_COMBO1, &Cauthentication_serverDlg::OnCbnDblclkCurrentClient)
+	ON_CBN_EDITCHANGE(IDC_COMBO1, &Cauthentication_serverDlg::OnCbnEditchangeCurrentClient)
+	ON_CBN_DROPDOWN(IDC_COMBO1, &Cauthentication_serverDlg::OnCbnDropdownCurrentClient)
+	ON_BN_CLICKED(IDC_BUTTON_UPLOADFILE, &Cauthentication_serverDlg::OnBnClickedButtonUploadfile)
+	ON_BN_CLICKED(IDC_BUTTON_DOWNLOADFILE, &Cauthentication_serverDlg::OnBnClickedButtonDownloadfile)
+END_MESSAGE_MAP()
+
+
+// Cauthentication_serverDlg message handlers
+
+BOOL Cauthentication_serverDlg::OnInitDialog()
+{
+	CDialogEx::OnInitDialog();
+
+	// Add "About..." menu item to system menu.
+
+	// IDM_ABOUTBOX must be in the system command range.
+	ASSERT((IDM_ABOUTBOX & 0xFFF0) == IDM_ABOUTBOX);
+	ASSERT(IDM_ABOUTBOX < 0xF000);
+
+	CMenu* pSysMenu = GetSystemMenu(FALSE);
+	if (pSysMenu != NULL)
+	{
+		BOOL bNameValid;
+		CString strAboutMenu;
+		bNameValid = strAboutMenu.LoadString(IDS_ABOUTBOX);
+		ASSERT(bNameValid);
+		if (!strAboutMenu.IsEmpty())
+		{
+			pSysMenu->AppendMenu(MF_SEPARATOR);
+			pSysMenu->AppendMenu(MF_STRING, IDM_ABOUTBOX, strAboutMenu);
+		}
+	}
+
+	// Set the icon for this dialog.  The framework does this automatically
+	//  when the application's main window is not a dialog
+	SetIcon(m_hIcon, TRUE);			// Set big icon
+	SetIcon(m_hIcon, FALSE);		// Set small icon
+
+	// TODO: Add extra initialization here
+
+	return TRUE;  // return TRUE  unless you set the focus to a control
+}
+
+void Cauthentication_serverDlg::OnSysCommand(UINT nID, LPARAM lParam)
+{
+	if ((nID & 0xFFF0) == IDM_ABOUTBOX)
+	{
+		CAboutDlg dlgAbout;
+		dlgAbout.DoModal();
+	}
+	else
+	{
+		CDialogEx::OnSysCommand(nID, lParam);
+	}
+}
+
+// If you add a minimize button to your dialog, you will need the code below
+//  to draw the icon.  For MFC applications using the document/view model,
+//  this is automatically done for you by the framework.
+
+void Cauthentication_serverDlg::OnPaint()
+{
+	if (IsIconic())
+	{
+		CPaintDC dc(this); // device context for painting
+
+		SendMessage(WM_ICONERASEBKGND, reinterpret_cast<WPARAM>(dc.GetSafeHdc()), 0);
+
+		// Center icon in client rectangle
+		int cxIcon = GetSystemMetrics(SM_CXICON);
+		int cyIcon = GetSystemMetrics(SM_CYICON);
+		CRect rect;
+		GetClientRect(&rect);
+		int x = (rect.Width() - cxIcon + 1) / 2;
+		int y = (rect.Height() - cyIcon + 1) / 2;
+
+		// Draw the icon
+		dc.DrawIcon(x, y, m_hIcon);
+	}
+	else
+	{
+		CDialogEx::OnPaint();
+	}
+}
+
+// The system calls this function to obtain the cursor to display while the user drags
+//  the minimized window.
+HCURSOR Cauthentication_serverDlg::OnQueryDragIcon()
+{
+	return static_cast<HCURSOR>(m_hIcon);
+}
+
+
+
+
+void Cauthentication_serverDlg::OnBnClickedButtonStartserver()
+{
+	if (main_sock.current_state0 == 0){
+		int retval;
+		sockaddr_in server;
+		WSAData wsa;
+		UpdateData(TRUE);
+		WSAStartup(0x101, &wsa);
+
+		if (LocalPort > 65535){//检查端口号范围
+			MessageBox(CString("port number error!"), CString("server"), MB_OK);
+			return;
+		}
+
+		main_sock.mainsock = socket(AF_INET, SOCK_STREAM, 0);
+
+		server.sin_family = AF_INET;
+		//server.sin_addr.S_un.S_addr = htonl(INADDR_ANY);//绑定所有IP地址
+			server.sin_addr.S_un.S_un_b.s_b1 = 127;
+			server.sin_addr.S_un.S_un_b.s_b2 = 0;
+			server.sin_addr.S_un.S_un_b.s_b3 = 0;
+			server.sin_addr.S_un.S_un_b.s_b4 = 1;
+			
+		server.sin_port = htons(LocalPort);
+
+		retval = bind(main_sock.mainsock, (sockaddr *)&server, sizeof(server));
+		if (retval == -1)
+		{	
+			retval = WSAGetLastError();
+			MessageBox("bind error!", CString("server"), MB_OK);
+			return;
+		}
+		else{
+			retval = listen(main_sock.mainsock, 5);
+			retval = WSAAsyncSelect(main_sock.mainsock, m_hWnd, UM_SOCK, FD_ACCEPT);
+			main_sock.current_state0 = 1;//服务已开启
+			retval = startTranServer();//开启文件传输端口
+			if (retval == -1){
+
+			}
+			else{
+			}
+			
+			MessageBox(CString("start server success!"), CString("server"), MB_OK);
+
+		}
+	}
+	else{
+		MessageBox(CString("server has been started!"), CString("server"), MB_OK);
+	}
+}
+
+
+void Cauthentication_serverDlg::OnBnClickedButtonStopserver()
+{
+	if (main_sock.current_state0 != 0){
+		closesocket(main_sock.mainsock);
+		main_sock.mainsock = 0;
+		main_sock.current_state0 = 0;//服务关闭
+		WSACleanup();
+		sub_sock.count = 0;//flush subSock
+		char i;
+		for (i = 0; i < maxSubSockNum; i++){
+			sub_sock.current_state1[i] = 0;
+			sub_sock.subSockArray[i] = 0;
+			sub_sock.clientName[i] = _T("");
+			sub_sock.clientDlg[i] = _T("");
+		}
+		DisplayText = _T("");
+		UpdateData(FALSE);
+		PostMessage(WM_POST_CurrentListMSG, 0, (LPARAM)(&sub_sock));
+		CurrentClientMsgFlag = 2;
+		SendMessage(WM_POST_CurrentClientMSG, (WPARAM)(&CurrentClientMsgFlag), 0);
+		//server_start.EnableWindow(FALSE);
+	}
+	else{
+		MessageBox(CString("server hasn`t been started!"), CString("server"), MB_OK);
+	}
+}
+
+
+void Cauthentication_serverDlg::OnCbnSelchangeCombo1()
+{
+	// TODO: Add your control notification handler code here
+}
+
+
+void Cauthentication_serverDlg::OnBnClickedButtonSendmsg()
+{
+	if (main_sock.current_state0 == 1){
+		if (sub_sock.count > 0){
+			int len, retval, i, nIndex;
+			UpdateData(TRUE);
+			SOCKET tempS = 0;
+			CString tempName;
+			CString tempBuf;
+			nIndex = CurrentClient.GetCurSel();//current sel
+			CurrentClient.GetLBText(nIndex, tempName);
+			for (i = 0; i < maxSubSockNum; i++){
+				if (tempName == (sub_sock.clientName[i] + CString("\r\n"))){
+					tempS = sub_sock.subSockArray[i];
+					break;
+				}
+			}
+
+			if (2 == sub_sock.current_state1[i]){//判断是否处于工作状态
+				len = SendMsgText.GetLength();
+				if (0 != len){
+					sub_sock.data_to_client[i].Type = type_chat_DataToClient;
+					sub_sock.data_to_client[i].content = SendMsgText;
+					retval = send(tempS, (char*)&(sub_sock.data_to_client[i]), sizeof(sub_sock.data_to_client[i]), 0);
+					retval = send(tempS, (char*)SendMsgText.GetBuffer(0), len, 0);
+					SendMsgText.ReleaseBuffer();
+					if (retval == -1){
+						retval = WSAGetLastError();
+						if (retval != WSAEWOULDBLOCK){
+							closesocket(tempS);
+							sub_sock.current_state1[i] = 0;
+							sub_sock.subSockArray[i] = 0;
+							sub_sock.clientName[i] = _T("");
+							sub_sock.clientDlg[i] = _T("");
+							sub_sock.count -= 1;
+							DisplayText = _T("");
+							UpdateData(FALSE);
+							MessageBox(CString("failed to send! close connection!"), CString("server"), MB_OK);
+						}
+					}
+					else{
+						tempBuf.Format(_T("%s"), CString("我： "));
+						sub_sock.clientDlg[i] += (tempBuf + SendMsgText + CString("\r\n"));
+						DisplayText = sub_sock.clientDlg[i];
+						SendMsgText = _T("");
+						UpdateData(FALSE);
+					}
+				}
+				else{
+					MessageBox(CString("There is no content to send!"), CString("server"), MB_OK);
+				}
+			}
+			else{
+				MessageBox(CString("can't send messages to this invalid client!"), CString("server"), MB_OK);
+			}
+		}
+		else{
+			MessageBox(CString("client list is empty!"), CString("server"), MB_OK);
+		}
+	}
+	else{
+		MessageBox(CString("server hasn`t been started!"), CString("server"), MB_OK);
+	}
+}
+
+LRESULT	Cauthentication_serverDlg::WindowProc(UINT message, WPARAM wParam, LPARAM lParam){
+	SOCKET s, temps;
+	int Event;
+	sockaddr_in remote;
+	int retval;
+	USHORT lineNum, countPerLine = 25;
+	const UINT bufSize = 4096;
+	char buf[bufSize], i;
+	int len;
+	int indexOfTTRB;
+	CString tempName, tempBuf("");
+	CString queryData(""), queryReply("");
+	switch (message){
+	case UM_SOCK:
+		s = (SOCKET)LOWORD(wParam);
+		Event = LOWORD(lParam);
+		switch (Event){
+		case FD_ACCEPT:
+			len = sizeof(remote);
+			temps = accept(s, (sockaddr*)&remote, &len);
+			if (temps == SOCKET_ERROR){
+				closesocket(s);
+				main_sock.current_state0 = 0;
+				main_sock.mainsock = 0;
+				WSACleanup();
+				DisplayText = _T("");
+				UpdateData(FALSE);
+				MessageBox(CString("accept a connection error! please start server again!"), CString("server"), MB_OK);
+				sub_sock.count = 0;
+				char i;
+				for (i = 0; i < maxSubSockNum; i++){
+					sub_sock.current_state1[i] = 0;
+					sub_sock.subSockArray[i] = 0;
+					sub_sock.clientName[i] = _T("");
+					sub_sock.clientDlg[i] = _T("");
+				}
+				PostMessage(WM_POST_CurrentListMSG, 0, (LPARAM)(&sub_sock));
+				CurrentClientMsgFlag = 2;
+				SendMessage(WM_POST_CurrentClientMSG, (WPARAM)(&CurrentClientMsgFlag), 0);
+				break;
+			}
+			else{
+				for (i = 0; i < maxSubSockNum; i++){
+					if (sub_sock.subSockArray[i] == 0){
+						break;
+					}
+				}
+				
+				//发送质询数据
+				//queryData = CString("test to query");
+				//len = queryData.GetLength();
+				//retval = send(temps, (char*)queryData.GetBuffer(0), len, 0);
+				//queryData.ReleaseBuffer();
+				
+				//填写data_to_client（添加质询数据）
+				sub_sock.data_to_client[i].Type = type_query;
+				sub_sock.data_to_client[i].count_2byte = 10;
+				sub_sock.data_to_client[i].count_4byte = 20;
+				sub_sock.data_to_client[i].data_2byte = new USHORT[(const USHORT)sub_sock.data_to_client[i].count_2byte];
+				sub_sock.data_to_client[i].data_4byte = new UINT[(const USHORT)sub_sock.data_to_client[i].count_4byte];
+				//模拟质询数据
+				int k;
+				for (k = 0; k < sub_sock.data_to_client[i].count_2byte; k++){
+					sub_sock.data_to_client[i].data_2byte[k] = (USHORT)k;
+				}
+				for (k = 0; k < sub_sock.data_to_client[i].count_4byte; k++){
+					sub_sock.data_to_client[i].data_4byte[k] = (UINT)k;
+				}
+					
+				sub_sock.data_to_client[i].content = _T("");
+				//send to client(分三次发送)
+				retval = send(temps, (char*)&(sub_sock.data_to_client[i]), sizeof(sub_sock.data_to_client[i]), 0);
+				retval = send(temps, (char*)sub_sock.data_to_client[i].data_2byte, sizeof(USHORT) * sub_sock.data_to_client[i].count_2byte, 0);
+				retval = send(temps, (char*)sub_sock.data_to_client[i].data_4byte, sizeof(UINT) * sub_sock.data_to_client[i].count_4byte, 0);
+				delete sub_sock.data_to_client[i].data_2byte;
+				delete sub_sock.data_to_client[i].data_4byte;
+				if (retval == -1){
+					retval = WSAGetLastError();
+					if (retval != WSAEWOULDBLOCK){//超时处理待补充
+						closesocket(temps);
+						WSACleanup();
+						//更新子套接字管理结构体（回收资源）
+						sub_sock.current_state1[i] = 0;
+						sub_sock.subSockArray[i] = 0;
+						sub_sock.clientName[i] = _T("");
+						sub_sock.clientDlg[i] = _T("");
+						sub_sock.count -= 1;
+						MessageBox(CString("failed to send query datas! close connection!"), CString("server"), MB_OK);
+						break;
+					}
+				}//默认数据发送成功
+				sub_sock.count += 1;
+				sub_sock.current_state1[i] = 1;//进入下一状态，等待接收验证回复信息
+				sub_sock.subSockArray[i] = temps;
+				tempName.Format("%d", (int)temps);
+				MessageBox(CString("accept a connection"), CString("server"), MB_OK);
+				WSAAsyncSelect(temps, m_hWnd, UM_SOCK, FD_READ | FD_CLOSE);
+			}
+			break;
+		case FD_READ:
+			for (i = 0; i < maxSubSockNum; i++){
+				if (sub_sock.subSockArray[i] == s){
+					break;
+				}
+			}
+			len = recv(s, (char*)&data_from_client, sizeof(data_from_client), 0);
+			if (len <= 0){
+				retval = WSAGetLastError();
+				if (retval != WSAEWOULDBLOCK){
+					closesocket(s);//关闭子套接字
+					//更新子套接字管理结构体（回收资源）
+					sub_sock.current_state1[i] = 0;
+					sub_sock.subSockArray[i] = 0;
+					sub_sock.clientName[i] = _T("");
+					sub_sock.clientDlg[i] = _T("");
+					sub_sock.count -= 1;	
+					MessageBox(CString("failed to recv! close connection"), CString("server"), MB_OK);
+					break;
+				}
+				else
+					break;
+			}
+			else{
+				if (2 == sub_sock.current_state1[i]){
+					if (type_chat_DataFromClient == data_from_client.Type){
+						len = recv(s, (char *)buf, bufSize, 0);
+						if (len <= 0){
+							retval = WSAGetLastError();
+							if (retval != WSAEWOULDBLOCK){
+								closesocket(s);//关闭子套接字
+								//更新子套接字管理结构体（回收资源）
+								sub_sock.current_state1[i] = 0;
+								sub_sock.subSockArray[i] = 0;
+								sub_sock.clientName[i] = _T("");
+								sub_sock.clientDlg[i] = _T("");
+								sub_sock.count -= 1;
+								MessageBox(CString("failed to recv! close connection"), CString("server"), MB_OK);
+								break;
+							}
+							else
+								break;
+						}
+						else{
+							//更新聊天对话框内容
+							buf[len] = 0;
+							tempBuf.Format(_T("%s"), buf);
+							tempBuf = sub_sock.clientName[i] + CString("： ") + tempBuf;
+							sub_sock.clientDlg[i] += (tempBuf + CString("\r\n"));
+							DisplayText = sub_sock.clientDlg[i];
+							//将CurrentClient更新为此client
+							
+							int nIndex = CurrentClient.FindStringExact(0, sub_sock.clientName[i] + CString("\r\n"));
+							if (nIndex != -1){
+								CurrentClient.SetCurSel(nIndex);
+							}
+							//arrange the text to make it well organized
+							/*					len = sub_sock.clientDlg[i].GetLength();
+												if (len % countPerLine == 0){
+												lineNum = len / countPerLine;
+												}
+												else lineNum = len / countPerLine + 1;
+												for (i = 0; i < lineNum - 1; i++){
+												DisplayText += (tempBuf.Mid(i*countPerLine, countPerLine) + CString("\r\n"));
+												}
+												DisplayText += tempBuf.Right(len - (lineNum - 1)*countPerLine) + CString("\r\n\r\n");
+												*/
+							UpdateData(FALSE);
+						}
+					}
+					else if (type_upload_DataFromClient == data_from_client.Type){
+						len = recv(s, (char *)&file_abstract, sizeof(file_abstract), 0);
+						if (len <= 0){
+							retval = WSAGetLastError();
+							if (retval != WSAEWOULDBLOCK){
+								closesocket(s);//关闭子套接字
+								//更新子套接字管理结构体（回收资源）
+								sub_sock.current_state1[i] = 0;
+								sub_sock.subSockArray[i] = 0;
+								sub_sock.clientName[i] = _T("");
+								sub_sock.clientDlg[i] = _T("");
+								sub_sock.count -= 1;
+								MessageBox(CString("failed to recv a file! close connection"), CString("server"), MB_OK);
+								break;
+							}
+							else
+								break;
+						}
+						else{
+							
+							//更新ttrb_recv
+							indexOfTTRB = findFreeTTRB(&ttrb_recv);
+							ttrb_recv.clientName[indexOfTTRB] = sub_sock.clientName[i];
+							ttrb_recv.filepath[indexOfTTRB].Format(_T("./recvfile/%s"), file_abstract.filepath);
+							ttrb_recv.filesize[indexOfTTRB] = file_abstract.filesize;
+							ttrb_recv.count += 1;
+
+							//将CurrentClient更新为此client
+							int nIndex = CurrentClient.FindStringExact(0, sub_sock.clientName[i] + CString("\r\n"));
+							if (nIndex != -1){
+								CurrentClient.SetCurSel(nIndex);
+							}
+						}
+					}
+					
+				}
+				else if(1 == sub_sock.current_state1[i]){
+					if (type_result == data_from_client.Type){
+						//处理客户机验证回复信息
+						if (2048 == data_from_client.queryResult){//通过验证（暂时模拟验证计算结果，待完善！！）
+							//更新对应客户状态
+							sub_sock.current_state1[i] = 2;//进入工作状态
+							int k;
+							for (k = 0; k < maxSubSockNum; k++){
+								if (sub_sock.subSockArray[k] != 0){
+									if (sub_sock.clientName[k] == data_from_client.clientName){
+										//To do 
+										//提示客户机重名登录
+										return 0;
+										break;
+									}
+								}
+							}
+							sub_sock.clientName[i] = data_from_client.clientName;//更新为正式用户名
+							
+							//发送验证结果
+							sub_sock.data_to_client[i].Type = type_reply;
+							sub_sock.data_to_client[i].content = valid;
+							//分两次发送
+							retval = send(s, (char*)&(sub_sock.data_to_client[i]), sizeof(sub_sock.data_to_client[i]), 0);
+							retval = send(s, (char*)sub_sock.data_to_client[i].content.GetBuffer(0), sub_sock.data_to_client[i].content.GetLength(), 0);
+							sub_sock.data_to_client[i].content.ReleaseBuffer();
+							if (retval == -1){
+								retval = WSAGetLastError();
+								if (retval != WSAEWOULDBLOCK){
+									closesocket(s);
+									//更新子套接字管理结构体（回收资源）
+									sub_sock.current_state1[i] = 0;
+									sub_sock.subSockArray[i] = 0;
+									sub_sock.clientName[i] = _T("");
+									sub_sock.clientDlg[i] = _T("");
+									sub_sock.count -= 1;
+									WSACleanup();
+									break;
+								}
+							}
+							//更新currentlist currentclient
+							PostMessage(WM_POST_CurrentListMSG, 0, (LPARAM)(&sub_sock));
+							CurrentClientMsgFlag = 0;
+							tempName = sub_sock.clientName[i];
+							SendMessage(WM_POST_CurrentClientMSG, (WPARAM)(&CurrentClientMsgFlag), (LPARAM)(&tempName));
+							MessageBox(CString("accept a valid connection!"), CString("server"), MB_OK);
+						}
+						else{//未通过验证
+							closesocket(s);
+							//更新子套接字管理结构体（回收资源）
+							sub_sock.current_state1[i] = 0;
+							sub_sock.subSockArray[i] = 0;
+							sub_sock.clientName[i] = _T("");
+							sub_sock.clientDlg[i] = _T("");
+							sub_sock.count -= 1;
+							WSACleanup();
+							break;
+
+						}
+					}
+					else{
+						//To do
+					}
+				}
+				else{
+					//To do
+				}
+
+			}
+			break;
+		case FD_CLOSE:
+			closesocket(s);//close the sub-sock
+			for (i = 0; i < maxSubSockNum; i++){
+				if (sub_sock.subSockArray[i] == s){
+					sub_sock.subSockArray[i] = 0;
+					sub_sock.clientName[i] = _T("");
+					sub_sock.count -= 1;
+					break;
+				}
+			}
+			PostMessage(WM_POST_CurrentListMSG, 0, (LPARAM)(&sub_sock));
+			tempName.Format("%d", (int)s);
+			CurrentClientMsgFlag = 1;
+			SendMessage(WM_POST_CurrentClientMSG, (WPARAM)(&CurrentClientMsgFlag), (LPARAM)(&tempName));
+			break;
+		}
+		break;
+	case UM_SOCK_TRANS:
+		s = (SOCKET)LOWORD(wParam);
+		Event = LOWORD(lParam);
+		switch (Event){
+		case FD_ACCEPT:
+			len = sizeof(remote);
+			temps = accept(s, (sockaddr*)&remote, &len);
+			if (temps == SOCKET_ERROR){
+				closesocket(s);
+				tran_sock.transock = 0;
+				tran_sock.current_state = 0;
+				MessageBox(CString("fail to accept a file connection!"), CString("server"), MB_OK);
+			}
+			else{
+					MessageBox(CString("accept a file connection!"), CString("server"), MB_OK);
+					WSAAsyncSelect(temps, m_hWnd, UM_SOCK_TRANS, FD_READ | FD_CLOSE);
+
+							
+			}
+
+			break;
+		case FD_READ:
+			indexOfTTRB = searchTTRB(&ttrb_recv, s);
+			if (indexOfTTRB == -1){//在ttrb_recv中匹配传输子套接字信息，文件传输初始阶段无该信息，依次作为判断依据
+				len = recv(s, (char *)&file_trans_head, sizeof(file_trans_head), 0);
+				if (len <= 0){
+					//MessageBox(CString("failed to recv file!"), CString("server"), MB_OK);
+					return 0;
+				}
+				else{
+					if(file_trans_head.transType == transType_download){
+						indexOfTTRB = searchTTRB(&ttrb_send, file_trans_head.clientName);
+						ttrb_send.transock[indexOfTTRB] = s;
+						retval = sendFile(indexOfTTRB);
+
+						return 0;
+					}
+					else if(file_trans_head.transType == transType_upload){
+						tempBuf.Format(_T("%s"), file_trans_head.clientName);
+						indexOfTTRB = searchTTRB(&ttrb_recv, tempBuf);
+						ttrb_recv.transock[indexOfTTRB] = s;
+						MessageBox(CString("want to recv a file?") + ttrb_recv.filepath[indexOfTTRB], CString("server"), MB_OK);
+					}
+					else {
+						return 0;
+					}
+				}
+			}
+
+
+			len = recv(s, buf, bufSize, 0);
+			if (len <= 0){
+				retval = WSAGetLastError();
+				if (retval != WSAEWOULDBLOCK){
+					closesocket(s);//关闭子套接字
+					deleteTTRB(&ttrb_recv, indexOfTTRB);//销毁指定ttrb_recv元素
+					//MessageBox(CString("failed to recv file!"), CString("server"), MB_OK);
+					break;
+				}
+				else
+					break;
+			}
+			else{
+				if (len < bufSize){
+					buf[len] = '\0';
+				}
+				DWORD dwWrite;
+				bool bRet;
+				//保存文件
+				HANDLE hFile = CreateFile(ttrb_recv.filepath[indexOfTTRB], GENERIC_WRITE, FILE_SHARE_WRITE, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+				if (hFile == INVALID_HANDLE_VALUE) return 0;
+				SetFilePointer(hFile, 0, NULL, FILE_END);
+				bRet = WriteFile(hFile, buf, len, &dwWrite, NULL);
+				if (bRet == FALSE){
+					MessageBox(CString("write file error!"), CString("server"), MB_OK);
+
+				}
+				else{
+
+				}
+				CloseHandle(hFile);
+				
+				ttrb_recv.filesize[indexOfTTRB] -= len;//更新待接收文件大小
+				if (ttrb_recv.filesize[indexOfTTRB] <= 0){//文件接收完整
+					if (searchTTRB(&ttrb_send, s) == -1){//如果该子套接字不在ttrb_send队列，即未正在发送文件
+						closesocket(s);//关闭子套接字
+					}
+					deleteTTRB(&ttrb_recv, indexOfTTRB);//销毁指定ttrb_recv元素
+					
+					MessageBox(CString("write file success!"), CString("server"), MB_OK);
+
+					//通知对方成功接收文件
+					//To do？？？？？？？？？？？？？？？？
+				}
+
+			}
+
+			break;
+		case FD_CLOSE:
+			//销毁对应文件传输子套接字上的TTRB
+			indexOfTTRB = searchTTRB(&ttrb_recv, s);
+			if (indexOfTTRB != -1){
+				deleteTTRB(&ttrb_recv, indexOfTTRB);
+			}
+			indexOfTTRB = searchTTRB(&ttrb_send, s);
+			if (indexOfTTRB != -1){
+				deleteTTRB(&ttrb_send, indexOfTTRB);
+			}
+			break;
+		}
+		break;
+	}
+	return CDialogEx::WindowProc(message, wParam, lParam);//为什么这里需要调用？？
+}
+
+LRESULT Cauthentication_serverDlg::UpdateCurrentList(WPARAM wParam, LPARAM lParam)
+{
+	struct subSock * tempSock = (struct subSock *)lParam;
+	CurrentList = _T("");
+	char i, j = 0;
+	for (i = 0; i < maxSubSockNum; i++){
+		if (tempSock->subSockArray[i] != 0){
+			CurrentList += (tempSock->clientName[i] + CString("\r\n"));
+			j++;
+		}
+		if (j == tempSock->count) break;
+	}
+	UpdateData(FALSE);
+	return 0;
+}
+
+LRESULT Cauthentication_serverDlg::UpdateCurrentClient(WPARAM wParam, LPARAM lParam)
+{
+	char tempFlag = *(char *)wParam;
+	int nIndex, nIndex1;
+	CString tempName;
+	if (0 == tempFlag){//add
+		tempName = *(CString *)lParam;
+		CurrentClient.AddString(tempName + CString("\r\n"));
+		nIndex = CurrentClient.FindStringExact(0, tempName + CString("\r\n"));
+		if (nIndex == CB_ERR) return 0;
+		CurrentClient.SetCurSel(nIndex);
+	}
+	else if (1 == tempFlag){//delete
+		tempName = *(CString *)lParam;
+		nIndex = CurrentClient.FindStringExact(0, tempName + CString("\r\n"));
+		if (nIndex != -1){
+			CurrentClient.DeleteString((UINT)nIndex);
+			nIndex1 = CurrentClient.GetCurSel();//current sel
+			if ((CurrentClient.GetCount() == 0)||(nIndex1 == -1)){
+				CurrentClient.SetCurSel(0);
+			}
+		}
+	}
+	else if (2 == tempFlag){
+		if (0 != CurrentClient.GetCount()){
+			CurrentClient.ResetContent();
+		}
+	}
+	else
+	{
+		//Todo
+	}
+	UpdateData(FALSE);
+	return 0;
+}
+
+
+void Cauthentication_serverDlg::OnCbnDblclkCurrentClient()
+{
+	if (CurrentClient.GetCount() != 0){
+		CurrentClient.ShowDropDown(TRUE);
+	}
+}
+
+
+void Cauthentication_serverDlg::OnCbnEditchangeCurrentClient()
+{
+	// TODO: Add your control notification handler code here
+}
+
+
+void Cauthentication_serverDlg::OnCbnDropdownCurrentClient()
+{
+	// TODO: Add your control notification handler code here
+	if (CurrentClient.GetCount() != 0){
+		//CurrentClient.ShowDropDown(TRUE);
+	}
+}
+
+
+void Cauthentication_serverDlg::OnBnClickedButtonUploadfile()
+{
+	int indexOfTTRB;
+	if (main_sock.current_state0 == 1){
+		if (sub_sock.count > 0){
+			int len, retval, i, nIndex;
+			UpdateData(TRUE);
+			SOCKET tempS = 0;
+			CString tempName;
+			CString tempBuf;
+			nIndex = CurrentClient.GetCurSel();//current sel
+			CurrentClient.GetLBText(nIndex, tempName);
+			for (i = 0; i < maxSubSockNum; i++){
+				if (tempName == (sub_sock.clientName[i] + CString("\r\n"))){
+					tempS = sub_sock.subSockArray[i];
+					break;
+				}
+			}
+
+			if (2 == sub_sock.current_state1[i]){//判断是否处于工作状态
+				CString filepath = "./sendfile/client.txt";//待完善，需改成灵活的文件路径名
+				LONG32 fileSize;
+				HANDLE hFile = CreateFile(filepath, GENERIC_READ, 0, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+				if (hFile == INVALID_HANDLE_VALUE){
+					MessageBox(CString("read file error! fail to upload!"), CString("server"), MB_OK);
+					return;
+				}
+				fileSize = GetFileSize(hFile, NULL);
+
+				file_abstract.filepath[0] = 'c';
+				file_abstract.filepath[1] = 'l';
+				file_abstract.filepath[2] = 'i';
+				file_abstract.filepath[3] = 'e';
+				file_abstract.filepath[4] = 'n';
+				file_abstract.filepath[5] = 't';
+				file_abstract.filepath[6] = '.';
+				file_abstract.filepath[7] = 't';
+				file_abstract.filepath[8] = 'x';
+				file_abstract.filepath[9] = 't';
+				file_abstract.filepath[10] = '\0';
+				file_abstract.filesize = fileSize;
+				len = 11;
+				if (0 != len){
+					sub_sock.data_to_client[i].Type = type_upload_DataToClient;
+					retval = send(sub_sock.subSockArray[i], (char*)&sub_sock.data_to_client[i], sizeof(sub_sock.data_to_client[i]), 0);
+					retval = send(sub_sock.subSockArray[i], (char*)&file_abstract, sizeof(file_abstract), 0);
+					if (retval == -1){
+						retval = WSAGetLastError();
+						if (retval != WSAEWOULDBLOCK){
+							closesocket(sub_sock.subSockArray[i]);
+							sub_sock.current_state1[i] = 0;
+							sub_sock.subSockArray[i] = 0;
+							sub_sock.clientName[i] = _T("");
+							sub_sock.clientDlg[i] = _T("");
+							sub_sock.count -= 1;
+						}
+					}
+					else{
+						//更新TTRB
+						indexOfTTRB = findFreeTTRB(&ttrb_send);
+						ttrb_send.clientName[indexOfTTRB] = sub_sock.clientName[i];
+						ttrb_send.filepath[indexOfTTRB].Format(_T("./sendfile/%s"), file_abstract.filepath);
+						ttrb_send.filesize[indexOfTTRB] = file_abstract.filesize;
+						ttrb_send.count += 1;
+						
+						//判断对应文件传输子套接字是否有效
+						if ((-1 != searchTTRB(&ttrb_send, ttrb_send.clientName[indexOfTTRB])) || (-1 != searchTTRB(&ttrb_recv, ttrb_send.clientName[indexOfTTRB]))){
+							//有效
+							retval = sendFile(indexOfTTRB);
+						}
+
+
+					}
+
+				}
+				else{
+					MessageBox(CString("You haven`t chosen any file to upload!"), CString("client"), MB_OK);
+				}
+
+
+			
